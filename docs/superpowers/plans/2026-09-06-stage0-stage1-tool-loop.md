@@ -38,15 +38,18 @@
 - Consumes: nothing (first task)
 - Produces: `job_agent.config.MODEL: str`, `job_agent.config.MAX_TOKENS: int`, `job_agent.config.PROJECT_ROOT: Path`, `job_agent.config.require_api_key() -> str`
 
-- [ ] **Step 1: Initialize the repo and project**
+- [x] **Step 1: Initialize the repo** — DONE. `git init -b main` has been run, `.gitignore` is committed, and the remote is live at `github.com/JohnyEskandar/job-application-agent` (private, HTTPS auth via `gh`).
+
+- [ ] **Step 2: Initialize the Python project**
 
 ```bash
 cd "/Users/johnyeskandar/Developer/Agentic/Job form automation"
-git init -b main
 uv init --lib --name job-agent --python 3.14
 ```
 
 `--lib` produces a `src/job_agent/` layout, which keeps importable code separate from scripts.
+
+Note: `uv init` may write its own `.gitignore`. Ours is already committed and covers more — if uv overwrites it, restore with `git checkout .gitignore`.
 
 - [ ] **Step 2: Add dependencies and create the venv**
 
@@ -84,40 +87,19 @@ testpaths = ["tests"]
 addopts = "-q"
 ```
 
-- [ ] **Step 6: Write `.gitignore`**
-
-```gitignore
-# secrets and personal data
-.env
-profile.yaml
-docs/resume.pdf
-
-# run artifacts (screenshots contain PII)
-runs/
-browser-profile/
-
-# python
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-
-.DS_Store
-```
-
-- [ ] **Step 7: Write `.env.example` and your real `.env`**
-
-`.env.example` (committed):
+- [x] **Step: `.gitignore`** — DONE, committed before the first commit so no secret can be in history. Verify it survived `uv init`:
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-replace-me
+grep -c "" .gitignore && grep -E '^\.env$|^profile\.yaml$' .gitignore
 ```
 
-Then create the real one, which `.gitignore` already excludes:
+- [ ] **Step: Put your real API key in `.env`**
+
+`.env.example` is committed and `.env` already exists but is empty. Paste your key from https://console.anthropic.com/settings/keys into it:
 
 ```bash
-cp .env.example .env
-# edit .env and paste your real key from console.anthropic.com
+echo 'ANTHROPIC_API_KEY=sk-ant-your-real-key-here' > .env
+git status --short   # .env must NOT appear
 ```
 
 - [ ] **Step 8: Write the failing test**
