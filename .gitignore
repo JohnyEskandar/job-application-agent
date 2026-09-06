@@ -1,0 +1,16 @@
+# secrets and personal data
+.env
+profile.yaml
+docs/resume.pdf
+
+# run artifacts (screenshots contain PII)
+runs/
+browser-profile/
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+.DS_Store
