@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head><title>Application Form</title></head>
+  <body>
+    <h1>Apply</h1>
+    <form>
+      <label for="first_name">First name</label>
+      <input id="first_name" name="first_name" type="text" required />
+
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" required />
+
+      <label for="cover">Why do you want this role?</label>
+      <textarea id="cover" name="cover"></textarea>
+
+      <label for="source">How did you hear about us?</label>
+      <select id="source" name="source">
+        <option value="">Select...</option>
+        <option value="linkedin">LinkedIn</option>
+        <option value="referral">Referral</option>
+      </select>
+
+      <button id="submit" type="submit">Submit application</button>
+    </form>
+  </body>
+</html>
