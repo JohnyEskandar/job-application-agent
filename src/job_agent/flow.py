@@ -29,6 +29,20 @@ CONFIRMATION_WORDS = re.compile(
 # posting rather than an application form — the button navigates to the form.
 LANDING_PAGE_MAX_FIELDS = 3
 
+# Buttons that move to the NEXT page of a multi-step form. Deliberately no
+# "submit", "apply", or "send" — advancing must never be able to send the
+# application. "Save and continue" and "Save & continue" are common enough to
+# name explicitly rather than rely on a bare \bcontinue\b match.
+ADVANCE_PATTERNS = [
+    r"save\s*(and|&)\s*continue",
+    r"save\s*(and|&)\s*next",
+    r"\bcontinue\b",
+    r"\bnext\b",
+    r"\bproceed\b",
+    r"next step",
+    r"\bsave\b(?!.*\bdraft\b)",
+]
+
 EDITABLE = (
     "input:not([type=hidden]):not([type=submit]):not([type=button]), "
     "textarea, select, [role=combobox], [role=textbox]"
@@ -135,6 +149,16 @@ def _click_first(page, patterns) -> bool:
     return False
 
 
+def advance(page) -> bool:
+    """Click whatever moves this form to its next page. Never submits.
+
+    Tries the most specific label first: "Save and continue" before a bare
+    "continue", so a page offering both does not match the vaguer one.
+    """
+    dismiss_overlays(page)
+    return _click_first(page, ADVANCE_PATTERNS)
+
+
 def run_application(
     page,
     *,
@@ -203,7 +227,7 @@ def run_application(
                 f"{(snapshot.submit_buttons or snapshot.apply_buttons)[0]!r} button.",
             )
 
-        if not _click_first(page, [r"\bnext\b", r"\bcontinue\b"]):
+        if not advance(page):
             return FlowResult("ready_for_human", pages, reports, "no way to advance")
 
     return FlowResult("guard_tripped", pages, reports, f"hit the {max_pages}-page cap")

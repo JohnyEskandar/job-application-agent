@@ -20,6 +20,20 @@ from job_agent.models import (
 
 TEXTUAL_KINDS = {"text", "textarea", "email", "tel", "number", "url", "date"}
 
+FALSEY = {"false", "no", "n", "off", "0", "unchecked", "none", ""}
+
+
+def _as_bool(value) -> bool:
+    """Coerce a planned value to a checkbox state.
+
+    bool("False") is True in Python — a non-empty string. The model returns
+    "False" as JSON text often enough that using bool() directly would tick a
+    box meaning the opposite of what was planned, silently and confidently.
+    """
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in FALSEY
+
 
 def upload_file(page, locator, path) -> None:
     """Attach a file to a file input.
@@ -152,9 +166,11 @@ def _write(page, locator, field: FormField, value) -> None:
     elif field.kind == "select":
         locator.select_option(label=str(value))
     elif field.kind == "checkbox":
-        locator.set_checked(bool(value))
+        locator.set_checked(_as_bool(value))
     elif field.kind == "radio":
-        locator.check()
+        # A radio planned as False means "do not pick this one".
+        if _as_bool(value):
+            locator.check()
     elif field.kind == "combobox":
         choose_in_custom_combobox(page, locator, value)
     elif field.kind == "file":
@@ -181,6 +197,8 @@ def _alnum(text: str) -> str:
 
 def _compare(field: FormField, intended: str, observed: str) -> str:
     """verified | normalized | mismatch."""
+    if field.kind in {"checkbox", "radio"}:
+        return "verified" if observed == str(_as_bool(intended)).lower() else "mismatch"
     if field.kind == "file":
         # a path can never equal "attached"; the attachment is the success
         return "verified" if observed == "attached" else "mismatch"

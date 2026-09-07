@@ -154,3 +154,32 @@ def test_a_blocked_navigation_click_does_not_crash(ctx):
     )
     result = run_application(page, planner=StubPlanner(), max_pages=2)
     assert result.outcome in {"ready_for_human", "needs_human", "guard_tripped"}
+
+
+def test_advance_matches_save_and_continue(ctx):
+    """Multi-step forms label this button many ways; a bare \\bnext\\b misses
+    most of them."""
+    from job_agent.flow import ADVANCE_PATTERNS
+    import re
+
+    for label in ["Next", "Continue", "Save and continue", "Save & Continue",
+                  "Save and Next", "Proceed", "Next Step"]:
+        assert any(re.search(p, label, re.I) for p in ADVANCE_PATTERNS), label
+
+
+def test_advance_can_never_match_a_submitting_button():
+    """Advancing must not be able to send the application."""
+    from job_agent.flow import ADVANCE_PATTERNS
+    import re
+
+    for label in ["Submit", "Submit application", "Apply", "Apply Now", "Send application"]:
+        assert not any(re.search(p, label, re.I) for p in ADVANCE_PATTERNS), label
+
+
+def test_advance_clicks_the_next_control(ctx):
+    page = ctx.new_page()
+    page.goto(url("wizard_page1.html"))
+    from job_agent.flow import advance
+
+    assert advance(page) is True
+    assert "wizard_page2" in page.url

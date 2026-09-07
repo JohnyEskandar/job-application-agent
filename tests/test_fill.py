@@ -132,3 +132,29 @@ def test_content_actually_changing_is_still_a_mismatch(ctx):
 
     assert report.results[0].outcome == "mismatch"
     assert not report.ok
+
+
+def test_the_string_False_does_not_tick_a_checkbox(ctx):
+    """bool("False") is True in Python. The model returns "False" as JSON text
+    often enough that using bool() directly ticks a box meaning the opposite of
+    what was planned — silently, and with full confidence."""
+    from job_agent.fill import _as_bool
+
+    for falsey in [False, "False", "false", "No", "no", "off", "0", ""]:
+        assert _as_bool(falsey) is False, falsey
+    for truthy in [True, "True", "true", "Yes", "yes", "on", "1", "checked"]:
+        assert _as_bool(truthy) is True, truthy
+
+
+def test_a_checkbox_planned_false_is_left_unchecked(ctx):
+    page = ctx.new_page()
+    page.set_content(
+        "<label for='c'>I have a preferred name</label><input id='c' type='checkbox'>"
+    )
+    snap = extract_snapshot(page)
+    field = next(f for f in snap.fields if f.kind == "checkbox")
+    report = execute_plan(page, snap, FillPlan(fields=[PlannedField(
+        field_id=field.field_id, value="False", source="profile", confidence=1.0, note="t"
+    )]))
+    assert page.is_checked("#c") is False
+    assert report.results[0].outcome == "verified"

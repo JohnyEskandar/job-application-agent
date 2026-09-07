@@ -21,6 +21,7 @@ import anthropic
 from job_agent.browser import browser_context
 from job_agent.config import PROJECT_ROOT, require_api_key
 from job_agent.extract import extract_snapshot, probe_combobox_options
+from job_agent.flow import advance
 from job_agent.fill import execute_plan
 from job_agent.plan import build_plan
 from job_agent.profile import load_profile
@@ -114,9 +115,21 @@ def main() -> None:
                 pass
             show(snapshot, plan, report, str(shot))
 
-            again = input("\n  Fill another page? [y / Enter to finish] > ").strip().lower()
-            if again != "y":
-                break
+            print("\n  [c] click Continue / Save and continue, then fill the next page")
+            print("  [m] I will navigate myself — fill again when I press Enter")
+            print("  [Enter] finished")
+            again = input("  > ").strip().lower()
+
+            if again == "c":
+                if advance(target):
+                    target.wait_for_timeout(1500)
+                    print(f"  advanced to: {target.url[:74]}")
+                    continue
+                print("  Could not find a Continue button. Click it yourself, then press m.")
+                continue
+            if again == "m":
+                continue
+            break
 
         if live_pages(ctx):
             try:
