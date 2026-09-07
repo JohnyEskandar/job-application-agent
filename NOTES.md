@@ -1,372 +1,251 @@
 # Build Notes
 
-One entry per stage: what surprised me, what broke, what I changed and why.
-Written while it's fresh, mostly so I can talk about this properly later.
+How this project works and why it's built the way it is. Written as I go, so I
+can explain any layer of it without re-reading the code.
 
 ---
 
-## Stage 0 — setup
+## What this is
 
-### The Python on this machine was a mess
+Give it a URL to a job posting. It opens the posting in a real browser, fills
+the application form from a stored profile, drafts answers to questions the
+profile doesn't cover, then stops and shows what it's about to submit. On my
+approval it clicks Submit.
 
-`python` resolved to anaconda's 3.11.5 while `python3` resolved to the system
-3.9.6. Two different interpreters in the same shell, which means "I installed
-that package" and "Python can't find that package" could both be true at once.
-
-Fixed by installing 3.14.7 through `uv` with `--default`, which drops `python`,
-`python3`, and `python3.14` shims into `~/.local/bin`. That directory was
-already first on my PATH, so nothing in my shell config had to change and conda
-was left alone — my `cse217a` and `otter-py311` course envs still work via
-`conda activate`.
-
-Deliberately did **not** remove `~/Library/Python/3.9/bin` from PATH even though
-it's stale, because it holds `jupyter`, `ipython`, and `otter`, which I use for
-class.
-
-### The pip landmine
-
-Bare `pip` / `pip3` still resolve to that stale 3.9 install. Installing with it
-puts packages somewhere 3.14 can't see, which produces the most confusing error
-in Python: the package is definitely installed and definitely not importable.
-
-Rule I'm adopting: **outside a venv, always `python -m pip`.** It follows
-whichever `python` just ran, so it can't disagree with the interpreter.
-
-### Why a venv at all
-
-`.venv` holds this project's own interpreter and its 27 packages. Two projects
-needing different versions of the same library don't fight. `uv` also installed
-the project itself into the venv in **editable mode** — that's why
-`from job_agent.config import ...` resolves from anywhere in the repo without
-touching `sys.path` or `PYTHONPATH`.
-
-`pyproject.toml` declares intent (`anthropic>=1.4.0`); `uv.lock` records the
-exact resolved versions. The pair is what makes this reproducible on someone
-else's machine.
-
-<!-- TODO(me): anything else about setup that tripped me up? -->
+Full design: `docs/superpowers/specs/2026-09-06-job-application-agent-design.md`
 
 ---
 
-## Stage 0 — three bugs I caused, and what each taught me
+## How it works
 
-### 1. Markdown fences in a TOML file
+### Claude never runs anything. It asks.
 
-Pasted a code block out of the plan into `pyproject.toml` and brought the
-` ```toml ` and closing ` ``` ` with it. TOML failed to parse at that exact line.
+This is the core idea and everything else follows from it.
 
-The fences are *document* syntax telling the renderer how to highlight the
-block — they are never part of the content. Obvious in hindsight; would have
-been much more confusing in a `.py` file, where it shows up as
-`SyntaxError` on line 1.
+Claude is a text model — input goes in, text comes out. It cannot execute a
+function, read a file, or make a network call. "Tool use" means Claude can emit
+a **structured request** saying *"please run `get_profile` and tell me what it
+returned."*
 
-### 2. `.env` needs `NAME=value`
+**My code runs everything, every time.** `dispatch_tool()` is the only thing
+that actually executes. Claude asks and waits.
 
-I wrote the bare key into `.env` with no variable name. `load_dotenv()` read the
-file, found no assignment, and set nothing — so `require_api_key()` would have
-raised "not set" while the key sat right there in the file.
+It never sees my source either. All it gets is what I put in the `tools` array:
 
-A `.env` file is a list of assignments, like a shell script. A line with only a
-value assigns it to nothing.
+```python
+{
+  "name": "get_profile",
+  "description": "Return the job candidate's stored profile as JSON: ...",
+  "input_schema": {"type": "object", "properties": {}, "required": []}
+}
+```
 
-### 3. The two different `ModuleNotFoundError`s
+Name, description, schema. That is the entire basis for its decision — which is
+why a vague description produces a tool that gets misused or skipped. **The
+description is the interface.**
 
-Ran `pytest` and got `No module named 'job_agent'`. Ran `.venv/bin/pytest` and
-got `No module named 'job_agent.config'`. **Different errors, different
-meanings:**
+### The API is stateless
 
-- `'job_agent'` — the package isn't found at all → wrong interpreter. I was on
-  anaconda's 3.11 with pytest 7.4.0, which has never heard of this project.
-- `'job_agent.config'` — package found, submodule missing → correct interpreter,
-  and the actual thing the test was waiting for me to write.
+There is no session on Anthropic's side. Nothing is remembered between requests.
+Every request resends the **whole** conversation.
 
-The giveaway was in pytest's first line the whole time:
-`platform darwin -- Python 3.11.5, pytest-7.4.0`. **Read the header before the
-traceback.** "Am I even on the right interpreter" is the first question when a
-test suite behaves inexplicably, and pytest answers it for free on every run.
+That's why the `tool_use_id` matters: it's the only thing linking my answer to
+its question. Claude emits `id=toolu_012gr...` with its request; I send back a
+`tool_result` carrying that same id. Mismatch is a 400.
 
-Root cause: `source .venv/bin/activate` only modifies the shell it runs in. If
-each command spawns a fresh shell, the activation dies with it. Real Terminal
-session → activate once, works all session.
+### The exchange
 
-<!-- TODO(me): which of these actually cost me the most time? worth ranking. -->
+```
+ME     ->  "What school does the candidate attend?"
+           + the tools it may request
+           + API key (auth only — nothing to do with tools)
+
+CLAUDE ->  stop_reason: "tool_use"
+           "I need get_profile.  id=toolu_012gr..."
+           <- has NOT answered. it can't. it's asking.
+
+ME     ->  my code runs get_profile() -> {"school": "Washington University..."}
+           resends the ENTIRE conversation, plus:
+           tool_result with tool_use_id=toolu_012gr...
+
+CLAUDE ->  stop_reason: "end_turn"
+           "The candidate attends Washington University in St. Louis."
+```
+
+### The loop
+
+The loop exists because Claude can't do anything without a round-trip. Each turn
+it either answers or asks. If it asks, control has to come back to my code.
+
+```python
+while stop_reason == "tool_use":
+    run whatever it asked for
+    send results back
+    ask again
+```
+
+It stops when `stop_reason` becomes `end_turn` — Claude produced an answer
+instead of a request.
+
+`stop_reason` is the whole control flow. Three values I care about:
+`tool_use` (asking), `end_turn` (done), and a `max_turns` guard for when it
+never terminates — which is how agent loops actually fail in practice, not with
+a wrong answer.
+
+### Parallel vs chained
+
+Claude can ask for several tools in **one** turn, or ask for them across
+separate turns.
+
+- **Parallel** — the two lookups are independent, so it requests both at once.
+  My run did this: 2 turns, both `tool_use` blocks in one assistant turn.
+- **Chained** — it needs the first result to form the second call. Would have
+  been 3 turns.
+
+My loop doesn't check which. It returns every result from a turn in one user
+message and goes again — both cases fall out of the same code.
+
+Two details that aren't obvious:
+
+- **All parallel results go back in ONE user message.** Splitting them across
+  messages trains the model to stop making parallel calls.
+- **A failing tool still gets a `tool_result`,** with `is_error: True`. Dropping
+  it leaves an unanswered `tool_use` and the next request 400s.
+
+### An assistant turn can hold several kinds of block
+
+My live run returned a text block ("I'll retrieve the profile and resume...")
+*alongside* two `tool_use` blocks, in the same turn. So the code searches
+`content` by block type instead of taking `content[0]`.
 
 ---
 
-## Stage 0 — decisions I made and why
+## What each file does
 
-### Anthropic SDK, not LangChain
-
-LangChain's `create_agent` would make Stage 1 about six lines — and would hide
-the exact `tool_use` / `tool_result` protocol Stage 1 exists to teach. Framework
-APIs churn; the wire format doesn't.
-
-Provider-swapping isn't a reason to adopt one either: `llm.py` is the only file
-that imports `anthropic`, and everything downstream depends on `FillPlan`, so a
-second provider is one ~40-line class.
-
-Planning to port to LangGraph in Stage 8.5 and write up the comparison. Making
-the tradeoff beats inheriting it.
-
-### Haiku for the learning stages, Opus for the planner
-
-Stages 1–6 prove mechanics, not judgment, so they run on `claude-haiku-4-5` at
-roughly $0.002/call. `claude-opus-5` is reserved for the Stage 5 field planner,
-where deciding what actually goes in a form field needs the better model.
-
-Set a hard spend cap in the console rather than trusting an estimate.
-
-Caught a real bug making this change: the Stage 1 code passed
-`thinking={"type": "adaptive"}` on every call, which **Haiku 4.5 rejects with a
-400** — adaptive thinking is an Opus 4.6+ feature. Thinking config is
-model-dependent, not universal. Would have hit this on my first API call.
-
-### `gh` over SSH keys
-
-Used GitHub CLI with HTTPS auth instead of registering an SSH key. Token lives
-in the macOS keychain. My existing SSH key is from a class and also authorizes a
-WashU shell server and two EC2 boxes — keeping GitHub off it means those
-concerns stay separate.
-
-<!-- TODO(me): do I actually agree with the Haiku/Opus split, or would I just
-     use one model? worth having an opinion for interviews. -->
+| File | Job |
+|---|---|
+| `config.py` | Loads the API key from `.env`; holds model names |
+| `stage1/tools.py` | The Python functions, the JSON schemas describing them to Claude, and `dispatch_tool()` — the only thing that executes anything |
+| `stage1/loop.py` | The loop: send, check `stop_reason`, run what was asked, send results, repeat |
+| `scripts/manual_roundtrip.py` | One round-trip done by hand and printed, to see the protocol |
+| `scripts/chained_demo.py` | The same via the loop, with a question needing both tools |
+| `tests/` | Prove the loop works against a fake client — no network, no cost |
 
 ---
 
-## Stage 0 — on secrets
+## Decisions, and why
 
-`.gitignore` was written and committed **before** the first commit, not after.
-That ordering is the whole point: a secret committed once stays in git history
-even after you delete the file, and cleaning it means rewriting history or
-rotating the key.
+### Tools are verbs. Context is nouns.
 
-Detail worth remembering: `^\.env$` is anchored. Unanchored `.env` would also
-match `.env.example`, which *should* be committed so anyone cloning knows which
-variables to set.
+`get_profile` as a tool is **deliberately the wrong architecture**, kept for one
+stage to prove the protocol.
 
-I did paste an API key into a chat transcript at one point. Nothing bad came of
-it and spend was capped, but the lesson stands: **you can't un-leak a secret,
-you can only make the leaked copy worthless.** Rotation invalidates every copy
-at once; chasing down copies is a losing game.
+The profile is static, small, and needed on every turn. Making Claude spend a
+round-trip asking for it wastes latency, and it might not ask. Static context
+belongs in the **system prompt**, where it also gets prompt-cached.
 
-<!-- TODO(me): rewrite this section in my own words — it's the one an
-     interviewer is most likely to poke at. -->
+Tools are for things that are **dynamic or have side effects** — read the page
+as it is *right now*, fill a field, upload a file, click Next. Things whose
+answer depends on the current state of the world, or that *change* something.
 
----
+Stage 2 deletes `stage1/tools.py` and proves it: one fewer round-trip, and a
+non-zero `usage.cache_read_input_tokens` on the second run. Both versions stay
+in git history — the diff is the point.
 
-## Stage 1 — the tool protocol (Task 3: one hand-built round-trip)
+### Raw Anthropic SDK, not LangChain
 
-Asked "What school does the candidate attend?" with `get_profile` declared as a
-tool. Got back a four-message conversation:
+LangChain's `create_agent` would make this about six lines — and would hide the
+exact `tool_use` / `tool_result` protocol above, which is the thing worth
+knowing. Framework APIs churn; the wire format doesn't.
 
-```
-[0] user       "What school does the candidate attend?"
-[1] assistant  tool_use    id=toolu_012gr22EHrfDi2wAxf38tPiX  name=get_profile  input={}
-[2] user       tool_result tool_use_id=toolu_012gr22EHrfDi2wAxf38tPiX
-[3] assistant  text        "...attends Washington University in St. Louis."
-```
+Provider-swapping isn't a reason to adopt one either. `llm.py` will be the only
+file importing `anthropic`, and everything downstream depends on `FillPlan`, so
+a second provider is one ~40-line class.
 
-### stop_reason is the loop's exit condition
+Stage 8.5 ports the loop to LangGraph and writes up the comparison. Expecting it
+to delete my loop guards and give the human-approval gate checkpoint/resume for
+free via `interrupt()`, while costing easy access to prompt caching and making
+the tests harder. Making the tradeoff beats inheriting it.
 
-Saw two values: `'tool_use'` on the first response and `'end_turn'` on the
-second. `'tool_use'` means Claude is not answering — it's asking *me* to run
-something and come back. `'end_turn'` means it's done.
-
-That's the whole basis for the `while` loop in Task 4: keep going while
-`stop_reason == "tool_use"`.
-
-### The id is the join key, because the API has no memory
-
-The same string `toolu_012gr...` appears in message 1 (Claude's request) and
-message 2 (my answer). Every request resends the **entire** conversation — the
-API is stateless — so that id is the only thing linking my result to its
-question.
-
-### Why the assistant's content goes back verbatim
-
-I append `first.content` — the actual list of SDK block objects — not a string
-summary. The API needs the original `tool_use` block present in the history so
-it can match my `tool_result` against it. Summarizing it would delete the id
-and break the pairing.
-
-### Claude never saw my function
-
-It decided to call `get_profile` from the **name, description, and schema
-alone**. The source code was never sent. That's why the description field
-matters so much: it's the entire basis for the model's decision.
-
-Also: message 1 contained *only* a tool_use block, no text. It could have had
-both, which is why I search `content` by block type instead of taking
-`content[0]`.
-
-### Two error classes, diagnosed completely differently
-
-Broke the `tool_use_id` on purpose. First attempt broke it the wrong way — I
-mangled the attribute name (`tool_use.idhjgjhgjhg`) and got:
-
-```
-AttributeError: 'ToolUseBlock' object has no attribute 'idhjgjhgjhg'
-```
-
-**That never reached the API.** Client-side crash, request never built, nothing
-spent. Traceback was all my file plus pydantic — no HTTP anywhere.
-
-Second attempt, replacing the *value* with `"toolu_wrong"`, produced the real
-thing:
-
-```
-anthropic.BadRequestError: Error code: 400
-  messages.2.content.0: unexpected `tool_use_id` found in `tool_result` blocks:
-  toolu_wrong. Each `tool_result` block must have a corresponding `tool_use`
-  block in the previous message.
-```
-
-Anatomy of that message, worth knowing because most API errors are worse:
-
-- `messages.2.content.0` — a **path into the request body I sent**: message
-  index 2, content block index 0. Points at the exact block.
-- names the offending value, so it's greppable
-- states the rule: the matching `tool_use` must be in the **immediately
-  previous** message, not anywhere in the conversation
-- `request_id` identifies the request on Anthropic's side, for support tickets
-
-**The rule I'm taking from this:** `AttributeError` / `TypeError` / `KeyError`
-means my code is wrong and nothing left the machine. A `BadRequestError` means
-my code ran fine and the *server* rejected the protocol. Traceback contents tell
-you which in about two seconds — my files versus `_base_client.py`.
-
-<!-- TODO(me): rewrite the above in my own words where it sounds like someone
-     else wrote it. Especially the error-class rule — that's the part I'd
-     actually get asked about. -->
-
----
-
-## Stage 1 — the loop (Task 4)
-
-Generalized the hand-built round-trip into `run_conversation()`: keep calling
-the API while `stop_reason == "tool_use"`, append results, stop on anything
-else. Eight tests, none of which touch the network.
-
-### The client is a parameter, and that's the whole trick
+### The client is a parameter, not a global
 
 ```python
 def run_conversation(client, user_message, ...):
 ```
 
-If the function built its own `anthropic.Anthropic()` internally, there would be
-no way to test it without real API calls — slow, costs money, and
-non-deterministic, since Claude might phrase an answer differently each run.
+If the function built its own `anthropic.Anthropic()`, there'd be no way to test
+it without real API calls — slow, costs money, and non-deterministic since
+Claude phrases answers differently each run.
 
-Because the client is injected, tests pass a `FakeClient` that **records**
-requests and **replays** canned responses. Python never checks the type — duck
-typing means anything supporting `client.messages.create(...)` works.
+Injected, tests pass a fake that records requests and replays canned responses.
+Python never checks the type; anything supporting `client.messages.create(...)`
+works.
 
-The payoff is being able to test things the real API can't be made to do on
-demand: force two tool calls in one response, force a chain across three turns,
-force a tool to raise, force a runaway loop.
+The payoff is testing what the real API can't be made to do on demand: force
+two tool calls in one response, force a three-turn chain, force a tool to raise,
+force a runaway loop. All eight loop tests run offline.
 
-### A failing test does not mean the code is wrong
+Same instinct drives Stage 3 having **no LLM in it at all** — pure Playwright.
+When something breaks later I need to know instantly whether it's a browser
+problem or a model problem.
 
-Best thing that happened today. `test_every_request_carries_the_tools_and_the_full_history`
-failed with `assert 4 == 1` — the first request appeared to carry 4 messages
-when it should have carried 1.
+### Cheap model for mechanics, good model for judgment
 
-The loop was correct. **The test's recording was broken.**
+Stages 1–6 run on `claude-haiku-4-5` (~$0.002/call) because they prove
+mechanics, not judgment. `claude-opus-5` is reserved for the Stage 5 planner,
+where deciding what actually goes in a form field needs the better model.
 
-```python
-self.calls.append(kwargs)          # stores a REFERENCE to the messages list
-```
+Thinking config is model-dependent, not universal: Haiku 4.5 **rejects**
+`thinking={"type": "adaptive"}` with a 400. That's an Opus 4.6+ feature.
 
-`run_conversation` builds one `messages` list and mutates it in place with
-`.append()` each turn. The fake stored a pointer to that same list, so every
-recorded call was watching one list evolve — and the assertion saw its final
-state, not what was sent at the time.
+Spend cap set in the console rather than trusted to an estimate. Whole job
+search should land in single-digit dollars.
 
-Fix was to snapshot at record time:
+### DOM snapshots, not screenshots
 
-```python
-recorded["messages"] = list(kwargs["messages"])
-```
+A vision loop (screenshot → model picks coordinates → click) is more general and
+worse on every axis that matters: a re-render invalidates coordinates, failures
+aren't reproducible, and a screenshot costs ~10x the tokens of the structured
+JSON describing the same form.
 
-Assignment in Python never copies; it binds another name to the same object.
-`list(x)` makes a new one.
+Instead: walk the page, emit compact JSON of every field, let the model decide
+*what goes where* and let Playwright decide *how to click*. Screenshots exist
+only to show me what's about to be submitted.
 
-If I had trusted the failure and "fixed" `run_conversation`, I'd have broken
-working code chasing a phantom. The generalizable rule: **anything that records
-mutable state for later inspection has to snapshot it at record time** — logs,
-undo stacks, event sourcing, React state, all the same trap.
+### Human approval before Submit, always
 
-### Details in the loop that aren't obvious
+An application can't be un-sent. The agent fills everything, then stops at a
+review screen showing each value and where it came from — `profile`,
+`answer_bank`, `generated`, or `default`. Generated answers are flagged.
 
-- **All parallel tool results go in ONE user message.** Splitting them across
-  messages trains the model to stop making parallel calls.
-- **A failing tool still gets a `tool_result`,** with `is_error: True`. Dropping
-  it leaves an unanswered `tool_use` and the next request 400s — the same error
-  I triggered deliberately in Task 3.
-- **`max_turns` guard.** The way agent loops actually fail is not a wrong
-  answer, it's never terminating.
-- **Every request resends the whole conversation.** The API is stateless; there
-  is no session.
-
-<!-- TODO(me): the aliasing bug is the best story here — rewrite it in my own
-     words, it's a real "how do you debug" answer. -->
+Nothing legally significant is ever LLM-generated: work authorization, EEO,
+degrees, dates, GPA, salary. Those come from the profile verbatim or the agent
+stops and asks.
 
 ---
 
-## Stage 1 — chaining vs parallel (Task 5)
+## What's next
 
-Asked something neither tool can answer alone: name a project from the resume
-that best demonstrates the major. Finished in **2 turns — parallel**, not
-chained.
-
-```
-[1] assistant text       "I'll retrieve the candidate's profile and resume..."
-[1] assistant tool_use   get_profile
-[1] assistant tool_use   get_resume_text     <- both in ONE assistant turn
-[2] user      tool_result {...profile...}
-[2] user      tool_result Johny Eskandar...  <- both in ONE user message
-[3] assistant text       the answer
-```
-
-**The tell:** both `tool_use` blocks in a single assistant turn, and
-`result.turns == 2`. Chained would have been 3 turns with one tool per turn.
-
-**Why parallel here:** the two lookups are independent. Neither call needs the
-other's result to be formed. If the question had been "find their major, then
-find a project matching *that* major," Claude would more likely have chained,
-because the second call depends on the first answer.
-
-My loop never asks which shape it's in — it just returns every result from a
-turn in one user message and goes again. Both cases fall out of the same code.
-
-### This run validated three things at once
-
-1. **Message [1] had a text block *and* two tool_use blocks.** If the code had
-   grabbed `content[0]` it would have taken the text block and crashed looking
-   for `.id`. Searching by block type is why it worked. Task 3's single
-   round-trip never produced this case — good reason to write the defensive
-   version before you can prove you need it.
-2. **Both results went back in one user message** — the thing
-   `test_parallel_tool_calls_return_in_a_single_user_message` asserted against
-   the fake, now confirmed against the real API.
-3. **The loop terminated on its own** via `stop_reason` flipping to
-   `end_turn`.
-
-<!-- TODO(me): my own read on why the loop generalizes — is there a case it
-     would NOT handle? worth thinking about before an interview. -->
+**Stage 2** — profile out of a tool and into a cached system prompt.
+**Stage 3** — Playwright with no LLM: persistent browser profile so logins
+survive between runs.
+**Stages 4–7** — page → `FormSnapshot` → `FillPlan` → execute → review gate.
 
 ---
 
-## Stage 1 — done. What Stage 2 destroys
+## Gotchas worth remembering
 
-Stage 2 deletes `stage1/tools.py` and moves the profile into the system prompt
-with a `cache_control` breakpoint. `run_conversation` survives; the profile
-tools do not.
+- `AttributeError`/`TypeError` = my code is wrong, nothing left the machine.
+  `BadRequestError` (400) = my code ran fine and the *server* rejected the
+  protocol. The traceback tells you which in two seconds.
+- Assignment in Python never copies — it binds another name to the same object.
+  Anything recording mutable state for later inspection has to snapshot it.
+- Environment changes only affect shells started *after* the change. `source`
+  in a throwaway shell does nothing.
+- Bare `pip` on this machine points at a stale 3.9 install. Use `python -m pip`,
+  or work inside the activated venv.
+- `.gitignore` before the first commit, not after. A secret committed once stays
+  in history even after you delete the file.
 
-The measurement that justifies it: one fewer round-trip, and a non-zero
-`usage.cache_read_input_tokens` on the second run.
-
-Keeping both in git history on purpose. Started with the profile as a tool,
-measured that it cost a round-trip and the model could skip it, moved static
-context into the cached system prompt and kept tools for actions. The diff is
-the point — tools are verbs, context is nouns.
+<!-- TODO(me): rewrite the "how it works" section in my own words once I'm sure
+     I could explain it cold. That's the section an interviewer would poke at. -->
