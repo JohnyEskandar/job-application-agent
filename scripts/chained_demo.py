@@ -10,6 +10,7 @@ import anthropic
 
 from job_agent.config import require_api_key
 from job_agent.stage1.loop import run_conversation
+from job_agent.stage1.tools import TOOLS
 
 QUESTION = (
     "Look at the candidate's major and their resume. Name one specific project "
@@ -21,7 +22,7 @@ def main() -> None:
     require_api_key()
     client = anthropic.Anthropic()
 
-    result = run_conversation(client, QUESTION)
+    result = run_conversation(client, QUESTION, tools=TOOLS)
 
     print(f"\nfinished in {result.turns} turns, {len(result.messages)} messages\n")
 

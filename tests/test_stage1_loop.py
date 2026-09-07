@@ -18,9 +18,18 @@ class FakeBlock:
 
 
 @dataclass
+class FakeUsage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+
+
+@dataclass
 class FakeResponse:
     stop_reason: str
     content: list
+    usage: FakeUsage = field(default_factory=FakeUsage)
 
 
 class FakeClient:
@@ -134,10 +143,27 @@ def test_max_turns_guard_stops_a_runaway_loop():
 
 def test_every_request_carries_the_tools_and_the_full_history():
     client = FakeClient([tool_response("get_profile"), text_response("WashU")])
-    run_conversation(client, "What school?")
+    run_conversation(client, "What school?", tools=[{"name": "get_profile"}])
 
     first, second = client.calls
     assert first["tools"]
     assert len(first["messages"]) == 1
     # the second call resends the whole conversation — the API is stateless
     assert len(second["messages"]) == 3
+
+
+def test_system_prompt_is_forwarded_on_every_request():
+    client = FakeClient([tool_response("get_profile"), text_response("ok")])
+    system = [{"type": "text", "text": "facts"}]
+    run_conversation(client, "q", system=system, tools=[{"name": "get_profile"}])
+
+    for call in client.calls:
+        assert call["system"] == system
+
+
+def test_tools_are_omitted_entirely_when_there_are_none():
+    client = FakeClient([text_response("ok")])
+    result = run_conversation(client, "q", tools=None)
+
+    assert "tools" not in client.calls[0]
+    assert result.turns == 1
