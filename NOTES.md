@@ -371,6 +371,9 @@ Uploaded the real resume to the live form and re-extracted. Never submitted.
 | Email | alex.kim@example.com | alex.kim@example.com | match |
 | Location | St. Louis, MO | St. Louis, MO | match |
 | Phone | `555-010-0100` | `(555) 010-0100` | reformatted |
+
+*(Contact details in these examples are placeholders — the real values live only
+in the gitignored `profile.yaml`.)*
 | LinkedIn | `https://www.linkedin.com/in/...` | `https://linkedin.com/in/...` | added www. |
 | Website | `https://www.johnyeskandar.com/` | `https://johnyeskandar.com` | added www. + slash |
 
@@ -533,6 +536,89 @@ by a flag, a config, or a future edit that seemed reasonable at the time. There
 is nothing here to flip.
 
 The browser stays open when the run ends so nothing typed by hand is lost.
+
+---
+
+## Retrospective — Stages 6 and 7
+
+Hypotheses under test:
+
+- **Stage 6:** a plan can be executed against a real page, and every write can
+  be verified rather than assumed.
+- **Stage 7:** the loop can walk a multi-page application safely, stopping at a
+  human.
+
+### What worked
+
+**Read-back verification earned its keep on the first live run.** Two failures
+surfaced that no amount of eyeballing the screen would have caught — a phone
+input mask, and a combobox that silently held the wrong thing. Without reading
+values back, both would have looked like success.
+
+**`--dry-run` was the right tool.** Fill everything, print the summary, always
+abandon. Every bug below was found that way, against the real form, with no
+possibility of sending anything.
+
+**Structural tests beat intentions.** "The agent must not submit" started as a
+test with a spy proving the loop never called an injected callable. When the
+requirement hardened to "cannot submit at all", the same idea scaled: inspect
+the function signature, grep the package for submit-targeting locators. Those
+tests fail if someone re-adds the capability by accident.
+
+**Option probing turned a mediocre run into a good one.** 9 filled / 7 for the
+human / 1 failure became **14 / 2 / 0**.
+
+### What went wrong
+
+**I only handled one kind of combobox.** The phone country-code selector is an
+`<input role=combobox>`; the ones I had built for were `<div role=combobox>`.
+They keep their value in different places, and reading the wrong one returns
+`""` — which is indistinguishable from an empty field. So the code decided an
+already-correct `+1 US` needed changing and opened a dropdown that only filters
+by typing.
+
+**The planner was choosing blind for six dropdowns.** `options` was `[]` for
+every custom combobox, because the extractor looked for native `<option>`
+children that a div does not have. The model guessed plausible wording instead
+of reporting that it could not see. The resulting failures pointed at wording,
+not at blindness.
+
+**I hardcoded `name="Submit"` when the snapshot already knew it was `"Apply"`.**
+The extractor had measured the right answer and the caller substituted a guess.
+That crashed the first real run, 30 seconds after approval — and the crash
+closed the browser, discarding an answer typed by hand.
+
+### What we found that we were not looking for
+
+**The submit click was the least valuable part of the design and carried all of
+the irreversible risk.** Typing 14 fields correctly is the entire benefit;
+clicking a button afterwards saves a second and creates the one action that
+cannot be undone. Cutting it made the tool simpler, safer, and no less useful.
+
+**Removing a capability is stronger than disabling it.** A default can be
+flipped by a flag, a config, or an edit that seemed reasonable at the time.
+There is nothing left to flip.
+
+**"Absence does not raise errors" — third occurrence.** Stage 4: EEO fields
+missing from a tag-based query. Stage 6: `options=[]` making the planner guess.
+Stage 6 again: `inner_text()` returning `""` for an input-based combobox. Every
+expensive bug in this project has been something that was **not there** rather
+than something that was wrong. Nothing throws, nothing logs, and the output
+looks plausible.
+
+### What it changes
+
+| Finding | Consequence |
+|---|---|
+| Two combobox shapes store values differently | Read by element shape, and no-op when already correct |
+| `options=[]` makes the planner invent wording | Probe each combobox before planning |
+| The snapshot knew the button name | Never substitute a guess for something already measured |
+| Submit was all risk, little value | Capability removed, enforced by signature and grep tests |
+
+**Honest headline:** the best decision in these two stages was deleting a
+feature. Everything else was recovering from bugs I introduced — and all three
+of the serious ones were the same shape: an empty value that looked like an
+answer.
 
 ---
 
