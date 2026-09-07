@@ -1,6 +1,7 @@
 """Extract a real application form and plan how to fill it. Fills nothing.
 
 Run:  python scripts/plan_demo.py <url>
+      python scripts/plan_demo.py --headed   # watch it in a real browser window
       python scripts/plan_demo.py            # uses the committed Rippling fixture
 """
 
@@ -20,9 +21,11 @@ FIXTURE = Path("tests/fixtures/rippling_apply.html").resolve().as_uri()
 
 def main() -> None:
     require_api_key()
-    url = sys.argv[1] if len(sys.argv) > 1 else FIXTURE
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    url = args[0] if args else FIXTURE
+    headed = "--headed" in sys.argv
 
-    with browser_context(headless=True) as ctx:
+    with browser_context(headless=not headed) as ctx:
         page = ctx.new_page()
         page.goto(url)
         page.wait_for_timeout(2500)

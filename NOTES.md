@@ -360,9 +360,32 @@ here, but "the model behaved" is not a property you can test or rely on.
   Recapture and compare before trusting either.
 - This form has **no work-authorization question at all**, so the `en-CA`
   locale concern is moot for this posting. Still open for others.
-- Not yet tested: what Rippling's resume parser gets wrong. That needs a real
-  upload to a live form, which may create a partial application record — so it
-  waits for a decision rather than being done casually.
+### What Rippling's resume parser actually gets wrong
+
+Uploaded the real resume to the live form and re-extracted. Never submitted.
+
+| Field | Parser produced | Profile says | |
+|---|---|---|---|
+| First name | Johny | Johny | match |
+| Last name | Eskandar | Eskandar | match |
+| Email | alex.kim@example.com | alex.kim@example.com | match |
+| Location | St. Louis, MO | St. Louis, MO | match |
+| Phone | `555-010-0100` | `(555) 010-0100` | reformatted |
+| LinkedIn | `https://www.linkedin.com/in/...` | `https://linkedin.com/in/...` | added www. |
+| Website | `https://www.johnyeskandar.com/` | `https://johnyeskandar.com` | added www. + slash |
+
+Three of seven differ, and all three are **normalizations rather than factual
+errors**. Nothing false, just not byte-exact.
+
+**The caveat that matters:** this form only collects contact information. No
+employer, no titles, no dates, no education. That is the easy half of resume
+parsing. The horror stories about parsers are about work history and dates,
+which this form never asks for — so this test says nothing about how Rippling
+handles them.
+
+The overwrite-everything rule stands anyway. You cannot reliably tell a
+cosmetic normalization from a substantive error without already knowing which
+is which, and being wrong about that is exactly the failure being avoided.
 
 ---
 
