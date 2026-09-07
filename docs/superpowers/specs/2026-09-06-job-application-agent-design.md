@@ -109,7 +109,7 @@ job_agent/
   models.py     every Pydantic model; the shared vocabulary
   profile.py    load + validate profile.yaml; read/write answer bank
   browser.py    persistent Chromium lifecycle
-  ats.py        detect ATS from URL/DOM; per-ATS quirks
+  ats.py        detect ATS from URL/DOM; per-ATS quirks (rippling, greenhouse, lever, ashby, workday)
   jobctx.py     scrape job title/company/description from the posting
   extract.py    Page -> FormSnapshot
   llm.py        Anthropic client; the only file that talks to the API
@@ -171,7 +171,7 @@ class FormField(BaseModel):
 class FormSnapshot(BaseModel):
     url: str
     page_title: str
-    ats: str | None                  # "greenhouse" | "lever" | "ashby" | "workday" | None
+    ats: str | None                  # "greenhouse" | "lever" | "ashby" | "workday" | "rippling" | None
     page_kind: Literal["form", "login", "review", "confirmation", "captcha", "unknown"]
     fields: list[FormField]
     next_buttons: list[str]          # selectors for Next/Continue
@@ -355,8 +355,8 @@ changed and why. That file is the interview prep.
 No test touches a live job posting.
 
 - **Fixtures.** Real application-form HTML saved from Greenhouse, Lever, Ashby,
-  and a Workday wizard, committed under `tests/fixtures/`, served to Playwright
-  from disk. Real markup, zero network, zero flake.
+  Rippling, and a Workday wizard, committed under `tests/fixtures/`, served to
+  Playwright from disk. Real markup, zero network, zero flake.
 - **`extract`** — golden JSON per fixture. Snapshot tests catch selector drift.
 - **`plan`** — recorded `FormSnapshot` + recorded API response. The LLM call is
   stubbed, so planner logic (confidence floor, source labelling, unresolved
