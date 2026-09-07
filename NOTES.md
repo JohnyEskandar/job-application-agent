@@ -289,6 +289,97 @@ evidence it holds.
 
 ---
 
+## Retrospective — Stages 2 and 3
+
+Each stage was a hypothesis, not just a build.
+
+- **Stage 2:** static context behind a tool is wasteful; move it to the system
+  prompt and you save a round-trip and get caching.
+- **Stage 3:** a persistent browser profile keeps logins alive, and browser code
+  can be tested offline.
+
+### What worked
+
+**The round-trip claim, cleanly.** 2 turns -> 1. Measurable, not argued. That is
+the entire payoff for building Stage 1 the wrong way on purpose.
+
+**Offline browser testing.** Five tests driving real Chromium against a local
+HTML file in 4.4 seconds. No network, no dependency on a live posting staying
+up.
+
+**The safety instruction, with evidence.** `work_authorization.status` says
+`"VERIFY - ..."`. Asked about sponsorship, the model answered the booleans and
+explicitly flagged the status as unverified rather than inventing "US Citizen."
+The never-infer rule held under a real test instead of being a comment.
+
+**Strict validation.** `extra="forbid"` turns a typo in profile.yaml into a load
+error instead of a blank field on a submitted application.
+
+### What didn't
+
+**I was wrong about caching.** I assumed a universal ~1024-token minimum. It is
+model-dependent and **not monotonic**: Opus 5 needs 512, Haiku 4.5 needs 4096 —
+eight times more, on a newer model. Below the threshold `cache_control` is
+silently ignored, and zeros look identical to a broken feature. Chased it twice
+before checking the docs.
+
+**Which exposed a tension in an earlier decision.** Haiku was chosen for Stages
+1-6 to save money, but Haiku cannot cache a profile of realistic size. So Stage
+2's thesis splits in half:
+
+- round-trip saving: works on every model
+- caching: only pays off on the planner model
+
+Running the numbers, Haiku-uncached still beats Opus-cached — output tokens
+dominate and caching only discounts input. On the Stage 5 planner (~6k in,
+~1.5k out) caching saves roughly a third. Real, worth having, smaller than I
+first implied.
+
+**Login persistence is unproven.** Scripts exist; the hypothesis is untested
+because logging in needs hands.
+
+**profile.yaml cannot be finished from a resume.** It gave experience,
+education, projects, skills. It says nothing about work authorization, mailing
+address, or salary expectations — and work authorization is exactly where a
+wrong guess becomes a misrepresentation on a real application.
+
+### What we found that we weren't looking for
+
+**Rippling's field names are random per-render hashes** (`4Za8M3kpmM`,
+`n6i9CInKB6_`). Selecting by `name` or `id` is impossible on that ATS.
+
+This is the most valuable thing in these two stages. The spec *assumed* the
+accessibility tree beat CSS selectors on debuggability grounds. It turns out to
+be the only thing that works at all on my actual target. An assumption became a
+constraint — found by looking at a real form for ten minutes instead of by
+having Stage 4 fail mysteriously.
+
+**Rippling never sets the HTML `required` attribute**; it validates in
+JavaScript. So `FormField.required` cannot be read from the DOM. An open design
+question for Stage 4, known before writing the extractor rather than after.
+
+**Test doubles have maintenance cost.** Adding `usage` to the real response
+shape broke every loop test until `FakeResponse` grew the same field. That is
+the tax on fakes: they must track what they stand in for, or they start passing
+tests that would fail in production.
+
+### What it changes
+
+| Finding | Consequence |
+|---|---|
+| Haiku cannot cache realistic prompts | Caching is a Stage 5 planner optimization, not a general one |
+| Rippling hashes field names | Accessibility tree is mandatory, not preferred |
+| No `required` attribute in the DOM | Stage 4 needs another requiredness signal |
+| Work auth unknowable from a resume | The never-generate list is not theoretical; the data genuinely is not there |
+
+**Honest headline:** Stage 2's thesis was half right, and finding out which half
+took a wrong assumption, two confused runs, and a docs check. Stage 3's real
+value was not the code — it was ten minutes looking at a live Rippling form,
+which turned one spec assumption into a confirmed constraint and one into an
+open question.
+
+---
+
 ## What's next
 
 **Stage 2** — profile out of a tool and into a cached system prompt.
