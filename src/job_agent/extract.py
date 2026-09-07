@@ -36,6 +36,22 @@ ATTENTION_PATTERNS = [
 
 TYPE_KINDS = {"file", "email", "tel", "number", "url", "date", "checkbox", "radio"}
 
+# Implicit ARIA roles. Getting these wrong makes locator_for build
+# get_by_role("textbox", name=...) for a checkbox, which matches nothing — so
+# the write fails with an error that looks like the field is missing.
+IMPLICIT_ROLE_BY_TYPE = {
+    "checkbox": "checkbox",
+    "radio": "radio",
+    "number": "spinbutton",
+    "range": "slider",
+    "search": "searchbox",
+    "email": "textbox",
+    "tel": "textbox",
+    "url": "textbox",
+    "text": "textbox",
+    "password": "textbox",
+}
+
 # Placeholder text that custom widgets expose instead of a real label.
 GENERIC_NAMES = re.compile(r"^(select\.{0,3}|choose\.{0,3}|please select|-+)$", re.I)
 
@@ -153,7 +169,14 @@ def extract_snapshot(page) -> FormSnapshot:
             continue
 
         tag = element.evaluate("e => e.tagName.toLowerCase()")
-        role = element.get_attribute("role") or ("combobox" if tag == "select" else "textbox")
+        role = element.get_attribute("role")
+        if not role:
+            if tag == "select":
+                role = "combobox"
+            elif tag == "textarea":
+                role = "textbox"
+            else:
+                role = IMPLICIT_ROLE_BY_TYPE.get(input_type, "textbox")
         # A custom widget carries its label in surrounding text, not on itself.
         if not element.get_attribute("aria-labelledby") and tag not in {"input", "textarea", "select"}:
             pass

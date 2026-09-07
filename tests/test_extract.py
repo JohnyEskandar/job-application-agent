@@ -109,3 +109,29 @@ def test_detect_ats_reads_the_host():
     assert detect_ats("https://boards.greenhouse.io/acme/jobs/1") == "greenhouse"
     assert detect_ats("https://jobs.lever.co/acme/1") == "lever"
     assert detect_ats("https://example.com/careers") is None
+
+
+def test_implicit_aria_roles_are_derived_from_the_input_type(ctx):
+    """A checkbox is not a textbox. Getting this wrong makes locator_for build
+    get_by_role("textbox", ...) for it, which matches nothing — and the write
+    fails with an error that looks like the field does not exist."""
+    page = ctx.new_page()
+    page.set_content(
+        "<label for='a'>Agree</label><input id='a' type='checkbox'>"
+        "<label for='b'>Pick</label><input id='b' type='radio'>"
+        "<label for='c'>Count</label><input id='c' type='number'>"
+        "<label for='d'>Name</label><input id='d' type='text'>"
+    )
+    by_name = {f.accessible_name: f for f in extract_snapshot(page).fields}
+    assert by_name["Agree"].role == "checkbox"
+    assert by_name["Pick"].role == "radio"
+    assert by_name["Count"].role == "spinbutton"
+    assert by_name["Name"].role == "textbox"
+
+
+def test_locator_for_finds_a_checkbox(ctx):
+    page = ctx.new_page()
+    page.set_content("<label for='a'>Agree</label><input id='a' type='checkbox'>")
+    snap = extract_snapshot(page)
+    field = next(f for f in snap.fields if f.kind == "checkbox")
+    assert locator_for(page, field).count() == 1
