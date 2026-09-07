@@ -241,10 +241,81 @@ you which in about two seconds — my files versus `_base_client.py`.
 
 ---
 
-## Stage 1 — the loop (Tasks 4 and 5)
+## Stage 1 — the loop (Task 4)
 
-<!-- Fill in after Task 5. Questions to answer:
-     - Why do parallel tool results go in a single user message?
-     - Did my run chain or parallelize, and how could I tell?
-     - What broke while writing the loop, if anything?
+Generalized the hand-built round-trip into `run_conversation()`: keep calling
+the API while `stop_reason == "tool_use"`, append results, stop on anything
+else. Eight tests, none of which touch the network.
+
+### The client is a parameter, and that's the whole trick
+
+```python
+def run_conversation(client, user_message, ...):
+```
+
+If the function built its own `anthropic.Anthropic()` internally, there would be
+no way to test it without real API calls — slow, costs money, and
+non-deterministic, since Claude might phrase an answer differently each run.
+
+Because the client is injected, tests pass a `FakeClient` that **records**
+requests and **replays** canned responses. Python never checks the type — duck
+typing means anything supporting `client.messages.create(...)` works.
+
+The payoff is being able to test things the real API can't be made to do on
+demand: force two tool calls in one response, force a chain across three turns,
+force a tool to raise, force a runaway loop.
+
+### A failing test does not mean the code is wrong
+
+Best thing that happened today. `test_every_request_carries_the_tools_and_the_full_history`
+failed with `assert 4 == 1` — the first request appeared to carry 4 messages
+when it should have carried 1.
+
+The loop was correct. **The test's recording was broken.**
+
+```python
+self.calls.append(kwargs)          # stores a REFERENCE to the messages list
+```
+
+`run_conversation` builds one `messages` list and mutates it in place with
+`.append()` each turn. The fake stored a pointer to that same list, so every
+recorded call was watching one list evolve — and the assertion saw its final
+state, not what was sent at the time.
+
+Fix was to snapshot at record time:
+
+```python
+recorded["messages"] = list(kwargs["messages"])
+```
+
+Assignment in Python never copies; it binds another name to the same object.
+`list(x)` makes a new one.
+
+If I had trusted the failure and "fixed" `run_conversation`, I'd have broken
+working code chasing a phantom. The generalizable rule: **anything that records
+mutable state for later inspection has to snapshot it at record time** — logs,
+undo stacks, event sourcing, React state, all the same trap.
+
+### Details in the loop that aren't obvious
+
+- **All parallel tool results go in ONE user message.** Splitting them across
+  messages trains the model to stop making parallel calls.
+- **A failing tool still gets a `tool_result`,** with `is_error: True`. Dropping
+  it leaves an unanswered `tool_use` and the next request 400s — the same error
+  I triggered deliberately in Task 3.
+- **`max_turns` guard.** The way agent loops actually fail is not a wrong
+  answer, it's never terminating.
+- **Every request resends the whole conversation.** The API is stateless; there
+  is no session.
+
+<!-- TODO(me): the aliasing bug is the best story here — rewrite it in my own
+     words, it's a real "how do you debug" answer. -->
+
+---
+
+## Stage 1 — chaining vs parallel (Task 5)
+
+<!-- Fill in after running scripts/chained_demo.py:
+     - Did my run chain across turns or parallelize in one? How could I tell?
+     - Why does the loop handle both without special-casing?
 -->
