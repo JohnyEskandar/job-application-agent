@@ -36,12 +36,22 @@ def _as_bool(value) -> bool:
 
 
 def upload_file(page, locator, path) -> None:
-    """Attach a file to a file input.
+    """Attach a file to a file input, unless the same file is already there.
 
-    File inputs are routinely hidden behind a styled button, so this targets
-    the underlying <input type=file> rather than whatever is visible.
+    Workday appends rather than replaces, so re-running against a form you
+    already filled attaches the resume a second and third time. The applicant
+    then submits three copies of the same PDF.
     """
-    locator.set_input_files(str(Path(path)))
+    wanted = Path(path)
+    try:
+        existing = locator.evaluate(
+            "e => (e.files ? Array.from(e.files).map(f => f.name) : [])"
+        )
+    except Exception:
+        existing = []
+    if wanted.name in (existing or []):
+        return
+    locator.set_input_files(str(wanted))
 
 
 def _is_input(locator) -> bool:

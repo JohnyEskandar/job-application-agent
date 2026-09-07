@@ -104,3 +104,22 @@ def test_a_filename_with_spaces_and_commas_uploads(ctx, tmp_path):
 
     name = page.eval_on_selector("#cv", "e => e.files[0].name")
     assert name == "Eskandar, Johny Resume.pdf"
+
+
+def test_the_same_file_is_not_uploaded_twice(ctx, tmp_path):
+    """Workday appends rather than replaces, so re-running a form attaches the
+    resume again — the applicant ends up submitting three copies."""
+    cv = tmp_path / "Eskandar, Johny Resume.pdf"
+    cv.write_bytes(b"%PDF-1.4 fake")
+
+    page = ctx.new_page()
+    page.goto(WIDGETS)
+
+    upload_file(page, page.locator("#cv"), cv)
+    first = page.eval_on_selector("#cv", "e => e.files.length")
+
+    upload_file(page, page.locator("#cv"), cv)   # same file again
+    second = page.eval_on_selector("#cv", "e => e.files.length")
+
+    assert first == 1
+    assert second == 1, "re-upload should be a no-op when the file is already attached"
