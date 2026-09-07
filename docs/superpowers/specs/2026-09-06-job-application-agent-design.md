@@ -54,7 +54,7 @@ an agent framework that hides the loop.
 | Env | project `.venv`, activated | `python`/`pip`/`pytest` work bare; reproducible for anyone cloning |
 | Browser | Playwright Chromium, `launch_persistent_context` | Logins survive between runs; real browser survives real ATS portals |
 | Playwright API | **sync**, not async | No async coloring, readable stack traces. Nothing here is IO-bound enough to need concurrency |
-| Model | `claude-opus-5`, `thinking={"type": "adaptive"}` | Judgment quality matters more than a few cents per application |
+| Model | `claude-haiku-4-5` for Stages 1-6; `claude-opus-5` + `thinking={"type": "adaptive"}` for the planner | Mechanics stages need a working loop, not judgment. Spend the better model only where field decisions are made. Note Haiku 4.5 rejects adaptive thinking |
 | SDK | `anthropic` **1.x** (1.4.0 at time of writing) | Most tutorials online are written against 0.x; signatures moved and it is on `httpx2`. Expect copied snippets to need adjusting |
 | Agent loop | hand-written, no framework | It is the thing being learned. No LangChain, no Tool Runner in v1 |
 | Field decisions | LLM plans, code executes | The model never clicks. It emits a plan; Playwright runs it and verifies |
@@ -372,15 +372,30 @@ No test touches a live job posting.
 
 ## 11. Cost and Performance
 
-Per application: roughly 2–6 model calls (one per form page, plus drafting).
-A `FormSnapshot` runs 2–5k tokens; the cached system prompt carries the profile.
-At Opus 5 pricing that is a few cents per application, dominated by input.
-Wall-clock is dominated by page loads, not inference — expect 30–90 seconds
+Per form page the planner sends ~6k tokens (snapshot + cached profile + job
+context) and receives ~1.5k. Applications average 2-3 pages.
+
+| Model | per page | per application | 100 applications |
+|---|---|---|---|
+| Opus 5 | ~$0.07 | ~$0.18 | ~$18 |
+| Sonnet 5 | ~$0.04 | ~$0.10 | ~$10 |
+| Haiku 4.5 | ~$0.014 | ~$0.04 | ~$4 |
+
+An entire job search costs single-digit to low-double-digit dollars. Three
+design decisions hold it there: DOM snapshots instead of screenshots (§3.2),
+which is roughly a 10x token difference; prompt caching on the profile, which
+is identical on every call; and the loop guards in §6, since runaway retries
+are how agent costs actually explode.
+
+**A hard spend cap is set in the Anthropic console** (Settings -> Limits)
+rather than trusted to estimates. Development runs on Haiku 4.5; only the
+Stage 5 planner uses Opus 5.
+
+Wall-clock is dominated by page loads, not inference — expect 30-90 seconds
 plus however long the human spends at the review gate.
 
-If cost ever matters, the lever is routing simple pages to a smaller model
-based on `FormSnapshot` complexity. Not built in v1; noted as the obvious
-extension.
+If cost needs to come down further, the lever is routing simple pages to a
+smaller model based on `FormSnapshot` complexity. Not built in v1.
 
 ## 12. Risks
 

@@ -14,7 +14,9 @@
 
 - Python **3.14.7**, pinned via `.python-version`. Never invoke bare `pip` — it resolves to a stale 3.9 install on this machine. Use `uv add`, or `python -m pip` inside the activated venv.
 - SDK is `anthropic` **1.x** (1.4.0+). It is built on `httpx2`, not `httpx`. Most tutorials online target 0.x and will not transcribe cleanly.
-- Model is **`claude-opus-5`** everywhere. Thinking is `{"type": "adaptive"}`; `budget_tokens` returns a 400 on this model and must never appear.
+- **Models are split by stage to control spend.** Stages 1-6 run on **`claude-haiku-4-5`** (~$0.002/call) because they prove mechanics, not judgment. **`claude-opus-5`** is reserved for the Stage 5 planner, where deciding what goes in a field actually needs the better model.
+- **Thinking config is model-dependent.** Haiku 4.5 does NOT support `thinking: {"type": "adaptive"}` — passing it returns a 400. Stage 1 omits `thinking` entirely. Adaptive thinking is introduced in Stage 5 alongside Opus 5, which does support it (and where `budget_tokens` must never appear — it 400s there).
+- **Set a spend limit before the first API call:** console.anthropic.com -> Settings -> Limits. $5 is far more than Stages 1-8 need.
 - **No agent framework.** No LangChain, no LangGraph, no `client.beta.messages.tool_runner`. The loop is written by hand — that is the deliverable. LangGraph is evaluated in Stage 8.5, not here.
 - **Tools are verbs; context is nouns.** `get_profile` as a tool is deliberate scaffolding for this stage and is deleted in Stage 2. Do not build anything that depends on it long-term.
 - `.env` and `profile.yaml` are never committed. `.env.example` is.
@@ -102,6 +104,8 @@ echo 'ANTHROPIC_API_KEY=sk-ant-your-real-key-here' > .env
 git status --short   # .env must NOT appear
 ```
 
+Then set a hard spend cap at console.anthropic.com -> Settings -> Limits. $5 makes overspending structurally impossible, and Stages 1-8 will not come close to it.
+
 - [ ] **Step 9: Write the failing test**
 
 `tests/test_config.py`:
@@ -109,11 +113,15 @@ git status --short   # .env must NOT appear
 ```python
 import pytest
 
-from job_agent.config import MODEL, MAX_TOKENS, PROJECT_ROOT, require_api_key
+from job_agent.config import MODEL, MAX_TOKENS, PLANNER_MODEL, PROJECT_ROOT, require_api_key
 
 
-def test_model_is_opus_5():
-    assert MODEL == "claude-opus-5"
+def test_default_model_is_the_cheap_one_for_learning_stages():
+    assert MODEL == "claude-haiku-4-5"
+
+
+def test_planner_model_is_reserved_for_judgment():
+    assert PLANNER_MODEL == "claude-opus-5"
 
 
 def test_max_tokens_is_generous_enough_for_non_streaming():
@@ -155,7 +163,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-MODEL = "claude-opus-5"
+# Stages 1-6 prove mechanics, not judgment — the cheap model is the right one.
+MODEL = "claude-haiku-4-5"
+
+# Reserved for the Stage 5 field planner, where judgment quality matters.
+# Note: Opus 5 supports thinking={"type": "adaptive"}; Haiku 4.5 does not.
+PLANNER_MODEL = "claude-opus-5"
+
 MAX_TOKENS = 16000
 
 
@@ -405,7 +419,8 @@ import anthropic
 from job_agent.config import MAX_TOKENS, MODEL, require_api_key
 from job_agent.stage1.tools import TOOLS, get_profile
 
-THINKING = {"type": "adaptive", "display": "summarized"}
+# No `thinking` parameter here: Haiku 4.5 does not support adaptive thinking,
+# and proving the tool protocol does not need it. Stage 5 adds it with Opus 5.
 
 
 def show_blocks(label: str, content) -> None:
@@ -413,8 +428,6 @@ def show_blocks(label: str, content) -> None:
     for block in content:
         if block.type == "text":
             print(f"  [text]     {block.text}")
-        elif block.type == "thinking":
-            print(f"  [thinking] {block.thinking[:200] or '(not surfaced)'}")
         elif block.type == "tool_use":
             print(f"  [tool_use] id={block.id} name={block.name} input={block.input}")
         else:
@@ -432,7 +445,6 @@ def main() -> None:
     first = client.messages.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
-        thinking=THINKING,
         tools=TOOLS,
         messages=messages,
     )
@@ -467,7 +479,6 @@ def main() -> None:
     second = client.messages.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
-        thinking=THINKING,
         tools=TOOLS,
         messages=messages,
     )
@@ -708,7 +719,8 @@ from dataclasses import dataclass
 from job_agent.config import MAX_TOKENS, MODEL
 from job_agent.stage1.tools import TOOLS, dispatch_tool
 
-THINKING = {"type": "adaptive", "display": "summarized"}
+# No `thinking` here — MODEL is Haiku 4.5, which rejects adaptive thinking.
+# Stage 5 switches the planner to PLANNER_MODEL and turns it on there.
 
 
 @dataclass
@@ -738,7 +750,6 @@ def run_conversation(
         response = client.messages.create(
             model=model,
             max_tokens=MAX_TOKENS,
-            thinking=THINKING,
             tools=tools,
             messages=messages,
         )
