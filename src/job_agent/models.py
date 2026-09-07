@@ -197,3 +197,32 @@ class Unresolved(Strict):
 class FillPlan(Strict):
     fields: list[PlannedField] = Field(default_factory=list)
     unresolved: list[Unresolved] = Field(default_factory=list)
+
+
+# --- filling -----------------------------------------------------------------
+
+FillOutcome = Literal["verified", "mismatch", "error", "skipped"]
+
+
+class FieldResult(Strict):
+    field_id: str
+    outcome: FillOutcome
+    intended: str
+    observed: str | None = None
+    detail: str | None = None
+
+
+class FillReport(Strict):
+    results: list[FieldResult] = Field(default_factory=list)
+
+    @property
+    def verified(self) -> list[FieldResult]:
+        return [r for r in self.results if r.outcome == "verified"]
+
+    @property
+    def failures(self) -> list[FieldResult]:
+        return [r for r in self.results if r.outcome in {"mismatch", "error"}]
+
+    @property
+    def ok(self) -> bool:
+        return not self.failures
