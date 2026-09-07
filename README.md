@@ -202,9 +202,27 @@ shape: an empty value that looked like an answer.
 
 ## Status
 
-Working end to end on Rippling ATS. Greenhouse, Lever, Ashby, and Workday are
-in the design but untested. Multi-page wizards are implemented and tested
-against fixtures, not yet against a real multi-step application.
+Tested against four real ATSs:
+
+| ATS | State |
+|---|---|
+| Rippling | Works end to end — 14 fields filled, 0 failures |
+| Greenhouse | Most fields fill; a file input and a few widget variants still fail |
+| Workday | Fills a five-block experience page and advances a seven-step form |
+| Eightfold | Redirects to Workday before its own flow matters |
+
+Extraction and planning generalized across all four with no per-ATS code.
+Writing needed per-widget work every time — see the retrospective in
+[`NOTES.md`](NOTES.md).
+
+Not yet handled: multi-selects (`Field of Study`, skills pickers), deleting
+spurious blocks a resume parser created, and questions whose text is rendered
+away from their control so the accessibility tree cannot reach it.
+
+**Skip a form's "autofill from resume" step if it offers one.** Workday's
+produced a job title of "Mastercard", a company of "LEADERSHIP & INVOLVEMENT…",
+and a whole resume section pasted into one role's description. Filling from a
+clean profile beats correcting a parse.
 
 ## Built as a learning project
 

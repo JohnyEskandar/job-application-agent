@@ -622,6 +622,149 @@ answer.
 
 ---
 
+## Retrospective — testing against four real ATSs
+
+Ran the agent against three real postings I was considering applying to:
+Edgehog (Rippling), ID.me (Greenhouse), and NVIDIA — whose Eightfold posting
+turns out to redirect to Workday, so that was four ATSs, not three.
+
+### Results
+
+| Site | ATS | Filled | For me | Failed |
+|---|---|---|---|---|
+| Edgehog | Rippling | 14 | 2 | 0 |
+| ID.me | Greenhouse | 19 | 5 | 5 |
+| NVIDIA | Eightfold -> Workday | 42 of 56 | 14 | see below |
+
+### The one-line summary
+
+**Reading generalized. Writing did not.**
+
+Extraction worked on all four ATSs with **zero changes**. On Greenhouse it
+found School, Degree, Discipline, both work-authorization questions and every
+EEO field without knowing anything about Greenhouse. On Workday it found 56
+fields across a five-block experience page.
+
+Planning generalized too. It mapped LinkedIn to experience block 1, Mastercard
+to block 2, Whiting-Turner to block 3. It noticed my resume says **May 2027**
+while ID.me's form asks about **Summer 2027** graduation, and flagged the
+discrepancy instead of guessing. It spotted that Workday had created a
+**spurious empty experience block** and refused to invent a job for it.
+
+Every single failure was in the write layer.
+
+### Eleven bugs, and what each one was really about
+
+**1. "Apply Now" is not "Apply".** The submit-button regex matched
+`submit|apply|send`, so a posting page's "Apply Now" — which navigates *to* the
+form — read as "this is the end of the application". Same word, opposite
+meanings; the discriminator is the field count.
+
+**2. A consent dialog that reports as invisible.** NVIDIA's privacy modal
+intercepted every pointer event while `is_visible()` returned False — so a
+visibility check skips exactly the overlay that is blocking you. The dismisser
+now ignores visibility and uses an allowlist of consent words, so it can never
+press Submit or Delete.
+
+**3. A navigation click raising out of the run.** A crash closes the browser and
+discards whatever the human typed by hand. Clicks are caught now.
+
+**4. react-select: fourteen phantom failures.** Greenhouse reported 19 failed
+writes. **The writes had landed.** react-select clears the input after you pick
+and renders the selection in a sibling element, so `input_value()` returns `""`
+on success — indistinguishable from a failed write. One read-back bug produced
+fourteen fictional failures and sent me debugging the wrong layer entirely.
+
+**5. Async typeaheads.** Greenhouse fetches options after the keystrokes, so a
+fixed 400ms wait found nothing and the widget cleared itself on blur. Now waits
+for options to exist, matches exact -> punctuation-insensitive -> containment ->
+sole-candidate, and clears uncommitted text rather than leaving it to vanish.
+
+**6. `bool("False")` is `True`.** The model returns "False" as JSON text, and a
+non-empty string is truthy. A checkbox planned False would have been **ticked** —
+silently, confidently, meaning the opposite of what was planned. This one could
+have put a wrong answer on a real application.
+
+**7. Checkboxes given `role="textbox"`.** The extractor defaulted every element
+without an explicit role to `textbox`, so `locator_for` built
+`get_by_role("textbox", name="I have a preferred name")` — matching nothing.
+Implicit ARIA roles now come from a type -> role table.
+
+**8. Duplicate accessible names: 35 fields never written.** Workday's experience
+page repeats a block per job — five "Company", five "Location", eight "Month",
+eight "Year". `locator_for` built a locator matching all of them, Playwright
+rejected it as ambiguous, and every one reported `error`. **I predicted this
+exact failure in the Stage 4 plan** — *"the fix is to add an occurrence index"* —
+and then did not build it. It cost a full run to rediscover.
+
+**9. Three resumes attached.** Workday appends rather than replaces, so each run
+added another copy of the same PDF. The applicant submits three.
+
+**10. `--auto` quitting before it started.** It treated the first "no fields" as
+the end of the application, so pressing Enter on the posting page ended the run.
+Auto mode now only takes over after a page has actually been filled.
+
+**11. Reading the wrong tab.** The script held the page object it created, so
+when a site opened the application in a new tab it kept re-reading the stale
+posting page and looked like it was doing nothing.
+
+I first tried `document.visibilityState` — it reports `"visible"` for **every**
+tab and does not identify the frontmost one. Useless. The signal that actually
+works is **the field count**: a posting has zero or one control, an application
+form has dozens. The form is the tab with the fields.
+
+That was the most instructive of the eleven: **I reached for a plausible signal
+before checking whether it carried the information I needed.** Verified the fix
+against the exact failure — posting tab explicitly in front, form in the
+background — and it follows the form, not the focus.
+
+### The resume-autofill finding, confirmed harshly
+
+I was told at the start that resume parsers always get something wrong. Workday
+proved it comprehensively. Its "Autofill with Resume" step produced:
+
+- five experience blocks for four real roles
+- a **job title of "Mastercard"** — a company name in the title field
+- `Company: "LEADERSHIP & INVOLVEMENTWashU Data Science Network"` — a section
+  header welded onto a name
+- `Company: "Whiting"` — truncated
+- `Location: "Fallon MO"` — O'Fallon, mangled
+- the entire PROJECTS section pasted into one role's description
+
+The design already said *a non-empty field is not a correct field*, and the
+overwrite-everything rule was already right. What this changes is the advice:
+**skip the resume-autofill step entirely when a form offers it.** Starting from
+an empty form and filling from a clean structured profile beats correcting a
+parse — for me and for the agent.
+
+### What is still not solved
+
+- **Multi-selects.** `Field of Study` and `Type to Add Skills` show "0 items
+  selected" / "15 items selected". A different widget needing repeated
+  type-and-pick.
+- **Deleting spurious blocks.** The agent can fill a block but not remove one,
+  and judging a block to be junk should stay with the human.
+- **Eightfold's own flow** was never actually reached — the posting redirects to
+  Workday before it matters.
+- **Questions rendered away from their control.** Workday's bare `Yes`/`No`
+  radios and a listbox labelled only "items selected" carry no question text the
+  accessibility tree can reach. The agent refuses them, which is correct — a
+  screen reader user would hit the same wall.
+
+### Honest headline
+
+Four ATSs, eleven bugs, and **not one of them was in the model's judgment.**
+Every failure was mechanical: reading the wrong property, clicking an ambiguous
+locator, coercing a string to the wrong boolean, guessing at a tab.
+
+And the recurring shape held again. `input_value()` returning `""` on a
+successful write. An ambiguous locator writing nothing. `options=[]` making the
+planner invent wording. **Absence still does not raise errors** — the count is
+now six across the project, and it remains the only category of bug here that
+has ever cost real time.
+
+---
+
 ## Retrospective — Stages 4 and 5
 
 Hypotheses under test:
