@@ -83,11 +83,40 @@ def _matches(field: FormField, intended: str, observed: str) -> bool:
     return observed.strip() == intended.strip()
 
 
-def execute_plan(page, snapshot: FormSnapshot, plan: FillPlan) -> FillReport:
+def order_for_execution(snapshot: FormSnapshot, planned: list[PlannedField]) -> list[PlannedField]:
+    """File uploads first.
+
+    The site parses the resume to prefill fields. Uploading first means our
+    values are written afterwards and win. Uploading last would let the parser
+    overwrite everything we just typed.
+    """
     by_id = {f.field_id: f for f in snapshot.fields}
-    results = [
-        _execute_one(page, by_id.get(planned.field_id), planned) for planned in plan.fields
-    ]
+
+    def is_file(p: PlannedField) -> bool:
+        field = by_id.get(p.field_id)
+        return bool(field and field.kind == "file")
+
+    return [p for p in planned if is_file(p)] + [p for p in planned if not is_file(p)]
+
+
+def execute_plan(
+    page, snapshot: FormSnapshot, plan: FillPlan, *, retries: int = 1
+) -> FillReport:
+    by_id = {f.field_id: f for f in snapshot.fields}
+    results: list[FieldResult] = []
+
+    for planned in order_for_execution(snapshot, plan.fields):
+        field = by_id.get(planned.field_id)
+        result = _execute_one(page, field, planned)
+
+        # A mismatch is often a re-render racing the write. Pausing before the
+        # retry matters — an immediate one loses the same race.
+        if result.outcome == "mismatch" and retries > 0:
+            page.wait_for_timeout(300)
+            result = _execute_one(page, field, planned)
+
+        results.append(result)
+
     return FillReport(results=results)
 
 
