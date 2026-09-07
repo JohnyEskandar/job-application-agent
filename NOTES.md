@@ -289,6 +289,83 @@ evidence it holds.
 
 ---
 
+## Stages 4 and 5 — extraction and planning
+
+A live application page now becomes 16-18 fields of JSON, and that JSON plus
+the profile becomes a plan saying what goes in each field and where it came
+from.
+
+### The extractor: three things real markup taught
+
+**1. Custom ARIA widgets are invisible to a tag query.** `input, textarea,
+select` missed every dropdown on the Rippling form, because Rippling renders
+them as `<div role="combobox">`. That silently dropped **all five EEO
+questions and the attention check** — the agent would have skipped them
+without any error. The selector now includes ARIA roles.
+
+**2. A label can live far from its control.** The attention-check combobox is
+seven nested divs that each contain only the word "Select". The question is on
+the eighth ancestor. A fixed-depth walk finds nothing; the fix is to climb
+until the text is meaningfully larger than the control's own.
+
+**3. Surrounding text must not drive classification.** Once the context walk
+got wide enough to find the question, it started matching the attention-check
+pattern for *every* field on the page — First name, Email, and LinkedIn were
+all classified `attention_check`, because the context blob contained the
+question. Context is a name fallback only; classification keys off the field's
+own resolved label.
+
+That third one is the interesting failure: **fixing the first bug caused the
+second.** Widening a search to find something makes it find things you did not
+want. Worth remembering as a shape, not just as this instance.
+
+### Snapshot size
+
+3.3KB of JSON for an 18-field form. A screenshot of the same page would be
+roughly an order of magnitude more tokens and would carry no field structure.
+This is the DOM-over-vision decision paying off in a number.
+
+### The planner: defense in depth, observed
+
+Run against the fixture and against the live page, the same EEO fields were
+refused by **different rules each time**:
+
+| Run | What stopped it |
+|---|---|
+| fixture | sensitive-pattern rule — "EEO/demographic may never be generated" |
+| live | confidence floor — model self-reported 0.50, below 0.6 |
+
+Neither run needed both. Having both is why it held twice.
+
+Everything the planner did fill came back `source=profile` — name, email, phone,
+location, LinkedIn, website, resume path. Nothing was generated. Everything it
+could not source went to the human: the attention check by policy, all five EEO
+fields, the SMS-consent radios, and an unlabelled second file upload it
+correctly refused to guess the purpose of.
+
+### Safety rules live in code, not in the prompt
+
+`apply_safety_rules()` re-checks everything the prompt asks for: the confidence
+floor, the never-generate list, hallucinated `field_id`s, attention checks, and
+unconfirmable resume-parser prefills. Five of the nine planner tests target
+that function rather than the model.
+
+**A prompt rule is a request. Code is the guarantee.** The model is well-behaved
+here, but "the model behaved" is not a property you can test or rely on.
+
+### Open
+
+- The live page returned 16 fields, the fixture 18 — the fixture has two
+  SMS-consent radios the live page did not show. Fixture drift, or a variant.
+  Recapture and compare before trusting either.
+- This form has **no work-authorization question at all**, so the `en-CA`
+  locale concern is moot for this posting. Still open for others.
+- Not yet tested: what Rippling's resume parser gets wrong. That needs a real
+  upload to a live form, which may create a partial application record — so it
+  waits for a decision rather than being done casually.
+
+---
+
 ## Retrospective — Stages 2 and 3
 
 Each stage was a hypothesis, not just a build.
