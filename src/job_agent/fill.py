@@ -74,12 +74,29 @@ def choose_in_custom_combobox(page, locator, value: str) -> None:
     try:
         option.wait_for(state="visible", timeout=4000)
         option.click()
+        return
     except Exception:
-        # No matching option. For a searchable input the typed text may itself
-        # be the value; for a div it is a genuine failure, which read-back
-        # will catch.
-        if not _is_input(locator):
-            raise
+        pass
+
+    # Exact match failed. Forms word these differently than a profile does —
+    # "No, I do not have a disability" vs "No, I don't have a disability".
+    # Fall back to a containment match in either direction before giving up.
+    try:
+        for candidate in page.get_by_role("option").all():
+            text = (candidate.inner_text() or "").strip()
+            if not text:
+                continue
+            a, b = _alnum(text), _alnum(wanted)
+            if a == b or (len(b) > 8 and (b in a or a in b)):
+                candidate.click()
+                return
+    except Exception:
+        pass
+
+    # Nothing matched. For a searchable input the typed text may itself be the
+    # value; for a div this is a genuine failure, which read-back will catch.
+    if not _is_input(locator):
+        raise RuntimeError(f"no option matching {wanted!r}")
 
 
 def _write(page, locator, field: FormField, value) -> None:

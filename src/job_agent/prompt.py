@@ -96,6 +96,26 @@ def profile_system_prompt(profile: Profile) -> str:
         f"Notice period: {p.preferences.notice_period or 'not provided'}",
         f"Remote preference: {p.preferences.remote_preference or 'not provided'}",
     ]
+    decline = "Decline to self-identify"
+    lines += [
+        "",
+        "## Voluntary demographic answers (EEO)",
+        "These are the candidate's own stated answers. Never infer, substitute,",
+        "or soften them.",
+        "Some entries are preference-ordered rules rather than single values —",
+        "e.g. 'X if the form offers it, otherwise Y'. Read the field's options",
+        "list and apply the rule against what is actually available.",
+        "Where wording differs slightly, pick the closest listed option. If no",
+        "option matches the stated answer, leave the field unresolved rather",
+        "than choosing something the candidate did not say.",
+        f"Gender: {p.eeo.gender or decline}",
+        f"Race: {p.eeo.race or decline}",
+        f"Hispanic or Latino: {p.eeo.hispanic_or_latino or decline}",
+        f"Veteran status: {p.eeo.veteran_status or decline}",
+        f"Disability status: {p.eeo.disability_status or decline}",
+        f"Sexual orientation: {p.eeo.sexual_orientation or decline}",
+    ]
+
     if p.documents:
         lines += [
             "",

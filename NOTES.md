@@ -456,6 +456,48 @@ above were found, and it is the right way to try a new posting.
 
 ---
 
+## The planner was choosing blind
+
+Biggest bug of the whole build, and it hid for two stages.
+
+`FormField.options` was `[]` for **every** custom combobox. The extractor read
+options with `element.locator("option")`, which finds native `<option>`
+children — and a `<div role=combobox>` has none. Its options are rendered into
+a portal that does not exist in the DOM until the control is opened.
+
+So the planner was picking values for six dropdowns without ever knowing what
+they offered. It looked like it was working, because it guessed plausible
+strings. The failures it produced were misleading:
+
+- **Disability Status "failed"** — the profile says "No, I do not have a
+  disability and have not had one in the past" (the federal wording); the form
+  offers "No, I don't have a disability". No exact match, so the click timed out.
+- **Race went unresolved** — the planner could not evaluate "Middle Eastern if
+  offered, otherwise Two or More Races" against an empty options list.
+
+Neither failure pointed at the real cause. Both looked like wording problems.
+
+**Fix:** `probe_combobox_options()` opens each combobox, reads the visible
+`[role=option]` items, and presses Escape. The flow probes before planning.
+
+| | before | after |
+|---|---|---|
+| fields filled | 9 | **14** |
+| left for the human | 7 | **2** |
+| failures | 1 | **0** |
+
+With real options in hand, the preference-ordered race rule resolved on its
+first choice — the form does offer "Middle Eastern or North African" — and
+Disability matched the form's own shorter wording.
+
+**The lesson:** an empty list is not the same as no answer, and a planner given
+`options=[]` will confidently invent plausible values rather than report that it
+cannot see. Silent absence again — the same shape as the EEO fields missing from
+the tag-based extractor in Stage 4. Twice now, the expensive bug was something
+that was not there rather than something that was wrong.
+
+---
+
 ## Retrospective — Stages 4 and 5
 
 Hypotheses under test:

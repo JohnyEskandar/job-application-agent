@@ -10,7 +10,7 @@ calls it without approval — and so production has exactly one call site.
 import re
 from dataclasses import dataclass, field as dc_field
 
-from job_agent.extract import extract_snapshot
+from job_agent.extract import extract_snapshot, probe_combobox_options
 from job_agent.fill import execute_plan
 
 CONFIRMATION_WORDS = re.compile(
@@ -94,6 +94,9 @@ def run_application(
 
         pages += 1
         snapshot = extract_snapshot(page)
+        # Discover what the dropdowns actually offer before planning — a
+        # planner choosing against options=[] is guessing at wording.
+        snapshot = probe_combobox_options(page, snapshot)
         plan = planner(snapshot)
         report = execute_plan(page, snapshot, plan)
         reports.append(report)

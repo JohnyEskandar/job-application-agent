@@ -213,6 +213,40 @@ def extract_snapshot(page) -> FormSnapshot:
     )
 
 
+def probe_combobox_options(page, snapshot: FormSnapshot) -> FormSnapshot:
+    """Open each combobox to discover what it actually offers, then close it.
+
+    Custom comboboxes render their options into a portal that does not exist
+    until the control is opened, so a static read returns []. A planner
+    choosing values against an empty options list is guessing at wording — it
+    is why "No, I do not have a disability and have not had one in the past"
+    failed to match, and why a preference-ordered race rule could not be
+    resolved.
+
+    Opening and pressing Escape leaves no value selected.
+    """
+    updated = []
+    for field in snapshot.fields:
+        if field.kind != "combobox" or field.options:
+            updated.append(field)
+            continue
+        try:
+            locator_for(page, field).click()
+            page.wait_for_timeout(350)
+            found = [
+                (o.inner_text() or "").strip()
+                for o in page.get_by_role("option").all()
+                if o.is_visible()
+            ]
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(150)
+        except Exception:
+            found = []
+        updated.append(field.model_copy(update={"options": [f for f in found if f]}))
+
+    return snapshot.model_copy(update={"fields": updated})
+
+
 def locator_for(page, field: FormField):
     """Resolve a FormField back to a Playwright locator.
 

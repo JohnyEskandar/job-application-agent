@@ -79,6 +79,22 @@ class Leadership(Strict):
     bullets: list[str] = Field(default_factory=list)
 
 
+class EEO(Strict):
+    """Voluntary demographic questions.
+
+    These are never generated — they come from here verbatim or the field is
+    routed to the human. Every one is legally voluntary; leaving a value unset
+    renders as "Decline to self-identify", which is always a valid answer.
+    """
+
+    gender: str | None = None
+    race: str | None = None
+    hispanic_or_latino: str | None = None
+    veteran_status: str | None = None
+    disability_status: str | None = None
+    sexual_orientation: str | None = None
+
+
 class Documents(Strict):
     """Paths to files a form may ask you to upload. Relative to the repo root."""
 
@@ -107,6 +123,7 @@ class Profile(Strict):
     projects: list[Project] = Field(default_factory=list)
     leadership: list[Leadership] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    eeo: EEO = Field(default_factory=EEO)
     documents: Documents | None = None
     preferences: Preferences = Field(default_factory=Preferences)
 
