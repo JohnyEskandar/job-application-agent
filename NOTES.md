@@ -230,28 +230,51 @@ Deleted `stage1/tools.py` and moved the profile into the system prompt behind a
 `cache_control` breakpoint. This is the payoff for building Stage 1 the wrong
 way on purpose.
 
-### Measured result
+### The round-trip is gone
 
 | | Stage 1 (tool) | Stage 2 (context) |
 |---|---|---|
 | turns to answer | 2 | **1** |
-| round-trips | ask -> tool_use -> run -> answer | ask -> answer |
+| shape | ask -> tool_use -> run -> answer | ask -> answer |
 
-The round-trip is gone. Claude no longer has to request the profile and wait —
-it's already in front of it on every call.
+Claude no longer has to request the profile and wait. It is already in front of
+it on every call.
 
-### Caching didn't kick in, and the reason is worth knowing
+### Caching: the minimum prefix is model-dependent, and NOT monotonic
 
-`cache_creation_input_tokens` and `cache_read_input_tokens` were both **0** on
-both runs. Not a bug: **the minimum cacheable prefix is ~1024 tokens**, and my
-system prompt is currently 1,156 characters (~289 tokens) because
-`profile.yaml` still has `experience: []` and `skills: []`.
+This cost me two rounds of confusion, and the lesson is the useful part.
 
-Under the threshold, caching silently does not happen. No error, no warning
-from the API — just zeros. I added an explicit size check to the demo so it
-says so out loud instead of looking broken.
+A `cache_control` marker on a prompt below the model's minimum is **silently
+ignored**. No error, no warning — just zeros in the usage numbers, which looks
+identical to the feature being broken.
 
-TODO: fill in profile.yaml properly, rerun, record the real numbers here.
+| Model | Minimum cacheable prefix |
+|---|---|
+| Claude Opus 5 | 512 tokens |
+| Opus 4.8, Sonnet 5, Sonnet 4.6 | 1024 |
+| Opus 4.7 | 2048 |
+| **Haiku 4.5** | **4096** |
+
+Newer does not mean smaller. Opus 5 needs 512 while Haiku 4.5 needs 4096 — eight
+times more.
+
+Measured on my real profile (~2165 tokens):
+
+```
+Haiku 4.5   under the 4096 minimum   creation=0     read=0        no caching
+Opus 5 #1   over the 512 minimum     creation=2165  read=0        cache WRITTEN
+Opus 5 #2   same prompt              creation=0     read=2165     cache READ
+```
+
+`input_tokens` went **1510 -> 24** on the cached runs. The 2165 cached tokens
+bill at the cache-read rate instead of full input price.
+
+So: Stage 2 buys a round-trip on every model, but the caching half only pays off
+on the planner model. The demo now takes `--planner` and prints the model's
+threshold with a verdict, so a zero never looks like a bug again.
+
+Side note: estimating tokens as `len(text) // 4` said 1403 when the real count
+was 2165. Fine as a smoke check, useless as a threshold test.
 
 ### The safety instruction actually worked
 
@@ -260,9 +283,9 @@ Asked whether the candidate needs sponsorship, the model answered the boolean
 fields but **explicitly flagged that the status needs verification** rather than
 inventing "US Citizen."
 
-That's the `Never infer work authorization, salary, dates, or GPA` rule in the
-system prompt doing its job. Worth remembering that a prompt rule is only as
-good as its test — this was the first evidence it holds.
+That is the `Never infer work authorization, salary, dates, or GPA` rule doing
+its job. A prompt rule is only worth what its evidence is; this was the first
+evidence it holds.
 
 ---
 

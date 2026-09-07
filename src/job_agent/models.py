@@ -60,6 +60,30 @@ class Experience(Strict):
     bullets: list[str] = Field(default_factory=list)
 
 
+class Project(Strict):
+    name: str
+    stack: str | None = None
+    date: str | None = None
+    bullets: list[str] = Field(default_factory=list)
+
+
+class Leadership(Strict):
+    organization: str
+    role: str
+    start: str
+    end: str
+    location: str | None = None
+    bullets: list[str] = Field(default_factory=list)
+
+
+class Documents(Strict):
+    """Paths to files a form may ask you to upload. Relative to the repo root."""
+
+    resume: str
+    transcript: str | None = None
+    cover_letter_template: str | None = None
+
+
 class Preferences(Strict):
     desired_salary: str | None = None
     earliest_start_date: str | None = None
@@ -74,5 +98,8 @@ class Profile(Strict):
     work_authorization: WorkAuthorization
     education: list[Education] = Field(default_factory=list)
     experience: list[Experience] = Field(default_factory=list)
+    projects: list[Project] = Field(default_factory=list)
+    leadership: list[Leadership] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    documents: Documents | None = None
     preferences: Preferences = Field(default_factory=Preferences)

@@ -592,7 +592,14 @@ Expected:
 
 - [ ] **Step 3: If `cache_read_input_tokens` is 0 on run 2, the prompt is too short**
 
-The minimum cacheable prefix is roughly **1024 tokens**. A thin profile silently will not cache — no error, just zeros.
+The minimum cacheable prefix is **model-dependent and not monotonic across
+generations**. Claude Opus 5 needs 512 tokens; Opus 4.8 / Sonnet 5 need 1024;
+Opus 4.7 needs 2048; **Haiku 4.5 needs 4096**. Below the threshold the
+`cache_control` marker is silently ignored — no error, just zeros.
+
+This means Stage 2's caching **cannot be demonstrated on Haiku 4.5** with a
+profile of realistic size. Run the demo with `--planner` (Opus 5) to see it
+work.
 
 Check the size:
 

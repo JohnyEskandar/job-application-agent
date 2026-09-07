@@ -62,6 +62,27 @@ def profile_system_prompt(profile: Profile) -> str:
         for bullet in x.bullets:
             lines.append(f"    - {bullet}")
 
+    if p.projects:
+        lines += ["", "## Projects"]
+        for proj in p.projects:
+            header = f"- {proj.name}"
+            if proj.stack:
+                header += f" ({proj.stack})"
+            if proj.date:
+                header += f", {proj.date}"
+            lines.append(header)
+            for bullet in proj.bullets:
+                lines.append(f"    - {bullet}")
+
+    if p.leadership:
+        lines += ["", "## Leadership"]
+        for lead in p.leadership:
+            lines.append(
+                f"- {lead.role}, {lead.organization} ({lead.start} to {lead.end})"
+            )
+            for bullet in lead.bullets:
+                lines.append(f"    - {bullet}")
+
     lines += [
         "",
         "## Skills",
@@ -73,6 +94,12 @@ def profile_system_prompt(profile: Profile) -> str:
         f"Notice period: {p.preferences.notice_period or 'not provided'}",
         f"Remote preference: {p.preferences.remote_preference or 'not provided'}",
     ]
+    if p.documents:
+        lines += [
+            "",
+            "## Documents on file",
+            f"Resume: {p.documents.resume}",
+        ]
     return "\n".join(lines)
 
 
