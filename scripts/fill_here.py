@@ -85,15 +85,17 @@ def main() -> None:
         print()
 
         chosen = None
-        first = True
+        filled_any = False
 
         while True:
-            if first or not auto:
+            # --auto only takes over AFTER a page has been filled. Before that
+            # you are still navigating, and giving up on the first empty page
+            # would end the run before it started.
+            if not (auto and filled_any):
                 try:
                     input("  Press Enter when a form is on screen (Ctrl-C to quit). > ")
                 except (KeyboardInterrupt, EOFError):
                     break
-            first = False
 
             if not live_pages(ctx):
                 print("  Every tab is closed. Nothing left to read.\n")
@@ -106,21 +108,27 @@ def main() -> None:
                 continue
 
             try:
-                target.bring_to_front()
                 print(f"\n  Reading: {target.title()[:64]}")
                 print(f"           {target.url[:78]}")
-                snapshot = probe_combobox_options(target, extract_snapshot(target))
+                snapshot = extract_snapshot(target)
+                if snapshot.fields:
+                    # Only steal focus once there is actually work to do here.
+                    target.bring_to_front()
+                    snapshot = probe_combobox_options(target, snapshot)
             except Exception as exc:
                 print(f"  Could not read that tab ({type(exc).__name__}). Try again.\n")
                 continue
 
             if not snapshot.fields:
-                if auto:
-                    print("  No form fields here — stopping.\n")
+                if auto and filled_any:
+                    print("  No form fields here — looks like the end. Stopping.\n")
                     break
-                print("  No form fields on that page. Navigate further and try again.\n")
+                print("  No form fields on that page. Navigate to the form and try again.")
+                print("  (forgetting the tab choice, so it will ask again)\n")
+                chosen = None
                 continue
 
+            filled_any = True
             print(f"  {len(snapshot.fields)} fields found. Planning...\n")
             plan = build_plan(client, snapshot, profile)
             report = execute_plan(target, snapshot, plan)
