@@ -22,6 +22,10 @@ ATS_HOSTS = {
     "myworkdayjobs.com": "workday",
 }
 
+# Eightfold hosts many employers on jobs.<company>.com and cannot be spotted by
+# host alone. Its posting URLs share a path shape.
+EIGHTFOLD_PATH = re.compile(r"/careers/job/\d+")
+
 # Questions designed to verify a human read the page. Never auto-answered.
 ATTENTION_PATTERNS = [
     re.compile(r"\b(select|type|enter|write)\s+the\s+(first|second|third|fourth|last)\s+word\b", re.I),
@@ -41,6 +45,8 @@ def detect_ats(url: str) -> str | None:
     for known, name in ATS_HOSTS.items():
         if host == known or host.endswith("." + known) or known in host:
             return name
+    if EIGHTFOLD_PATH.search(urlparse(url).path or ""):
+        return "eightfold"
     return None
 
 
@@ -202,6 +208,9 @@ def extract_snapshot(page) -> FormSnapshot:
                 found.append(text)
         return found
 
+    # "Apply Now" on a posting page means "go to the form"; "Apply" at the end
+    # of a filled form means "send it". Same word, opposite meanings — so keep
+    # them in separate lists and let the caller decide using the field count.
     return FormSnapshot(
         url=page.url,
         page_title=page.title(),
@@ -209,7 +218,8 @@ def extract_snapshot(page) -> FormSnapshot:
         ats=detect_ats(page.url),
         fields=fields,
         next_buttons=button_names(r"\b(next|continue)\b"),
-        submit_buttons=button_names(r"\b(submit|apply|send)\b"),
+        submit_buttons=button_names(r"\b(submit|send)\b"),
+        apply_buttons=button_names(r"\bapply\b"),
     )
 
 

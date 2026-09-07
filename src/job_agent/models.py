@@ -187,7 +187,12 @@ class FormSnapshot(Strict):
     ats: str | None = None
     fields: list[FormField] = Field(default_factory=list)
     next_buttons: list[str] = Field(default_factory=list)
+    # Sends the application: "Submit", "Send application".
     submit_buttons: list[str] = Field(default_factory=list)
+    # Ambiguous: "Apply Now" on a posting page navigates TO the form, while
+    # "Apply" at the end of a filled form sends it. Disambiguated by how many
+    # fields the page has — see flow.is_landing_page.
+    apply_buttons: list[str] = Field(default_factory=list)
 
     @field_validator("fields")
     @classmethod

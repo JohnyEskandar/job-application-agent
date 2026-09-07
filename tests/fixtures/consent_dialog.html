@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><title>Posting</title>
+<style>#backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10}</style></head>
+<body>
+  <h1>Solutions Architect</h1>
+  <a id="apply" href="wizard_page1.html">Apply Now</a>
+  <div id="backdrop" role="dialog" aria-modal="true" aria-label="Privacy agreement">
+    <p>We use cookies.</p>
+    <button id="ok">OK</button>
+  </div>
+  <script>
+    document.getElementById('ok').addEventListener('click', () => {
+      document.getElementById('backdrop').remove();
+    });
+  </script>
+</body></html>

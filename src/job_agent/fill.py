@@ -37,66 +37,113 @@ def _is_input(locator) -> bool:
 def combobox_value(locator) -> str:
     """Read a combobox regardless of how it is built.
 
-    Two shapes exist in the wild and they store their value in different
-    places: <div role=combobox> displays it as text, while
-    <input role=combobox> keeps it in .value and has no inner text at all.
-    Reading the wrong one returns "" and looks like an empty field.
+    Three shapes, three places the value lives:
+      - <div role=combobox>: the value IS its inner text.
+      - <input role=combobox>: the value is in .value.
+      - react-select style: the input is CLEARED after you pick, and the
+        selection renders in a sibling element. .value reads "" on success,
+        which is indistinguishable from a failed write.
+
+    Reading the wrong place is how Greenhouse looked like nineteen failed
+    writes when the writes had actually landed.
     """
-    if _is_input(locator):
-        return (locator.input_value() or "").strip()
-    return (locator.inner_text() or "").strip()
+    if not _is_input(locator):
+        return (locator.inner_text() or "").strip()
+
+    typed = (locator.input_value() or "").strip()
+    if typed:
+        return typed
+
+    # Empty input: look for a rendered selection beside it.
+    return (
+        locator.evaluate(
+            """e => {
+                const placeholder = /^(select\\.{0,3}|choose\\.{0,3}|)$/i;
+                let n = e.parentElement;
+                for (let i = 0; i < 3 && n; i++, n = n.parentElement) {
+                    // react-select and friends label the chosen value this way
+                    const picked = n.querySelector(
+                        '[class*=singleValue], [class*=single-value], [class*=selectedValue]'
+                    );
+                    if (picked) {
+                        const t = (picked.innerText || '').trim();
+                        if (t && !placeholder.test(t)) return t;
+                    }
+                }
+                return '';
+            }"""
+        )
+        or ""
+    ).strip()
 
 
 def choose_in_custom_combobox(page, locator, value: str) -> None:
-    """Open a div-based combobox and click the matching option.
+    """Set a combobox that is not a native <select>.
 
-    select_option() only works on a native <select>. Rippling — and most
-    component libraries — render dropdowns as divs, so the only way in is to
-    drive it the way a person would: click to open, click the option.
+    Three shapes have to work:
+      - <div role=combobox>: click to open, click the option.
+      - <input role=combobox>: click, type, wait for options, click one.
+      - typeahead with async options (Greenhouse): the option list arrives from
+        the server after the keystrokes, so a fixed short wait finds nothing
+        and the widget clears itself on blur — which reads back as "".
+
+    Never leave text typed into a typeahead without committing a selection.
     """
     wanted = str(value).strip()
 
-    # If it already holds what we want, leave it alone. Opening a searchable
-    # combobox we do not need to change is how the phone country-code selector
-    # failed: its option list is filtered by typing, so an exact-name click
-    # never resolves.
+    # Already correct: leave it alone rather than reopening it.
     if combobox_value(locator) == wanted:
         return
 
     locator.click()
 
-    # A searchable combobox needs the text typed before its options exist.
     if _is_input(locator):
         locator.fill(wanted)
-        page.wait_for_timeout(400)
 
-    option = page.get_by_role("option", name=wanted, exact=True)
+    # Wait for options to actually exist. Async typeaheads need real time.
+    options = page.get_by_role("option")
     try:
-        option.wait_for(state="visible", timeout=4000)
-        option.click()
-        return
+        options.first.wait_for(state="visible", timeout=6000)
     except Exception:
-        pass
+        # No list appeared. For a plain typeahead the typed text may itself be
+        # the answer; for a div-based control this is a genuine failure.
+        if _is_input(locator):
+            return
+        raise RuntimeError(f"no option list appeared for {wanted!r}")
 
-    # Exact match failed. Forms word these differently than a profile does —
-    # "No, I do not have a disability" vs "No, I don't have a disability".
-    # Fall back to a containment match in either direction before giving up.
-    try:
-        for candidate in page.get_by_role("option").all():
-            text = (candidate.inner_text() or "").strip()
-            if not text:
-                continue
-            a, b = _alnum(text), _alnum(wanted)
-            if a == b or (len(b) > 8 and (b in a or a in b)):
-                candidate.click()
-                return
-    except Exception:
-        pass
+    page.wait_for_timeout(250)
+    candidates = [
+        (o, (o.inner_text() or "").strip())
+        for o in options.all()
+    ]
+    candidates = [(o, t) for o, t in candidates if t]
 
-    # Nothing matched. For a searchable input the typed text may itself be the
-    # value; for a div this is a genuine failure, which read-back will catch.
-    if not _is_input(locator):
-        raise RuntimeError(f"no option matching {wanted!r}")
+    def pick():
+        for o, t in candidates:                     # exact
+            if t == wanted:
+                return o
+        for o, t in candidates:                     # case/punctuation-insensitive
+            if _alnum(t) == _alnum(wanted):
+                return o
+        for o, t in candidates:                     # containment, either way
+            a, b = _alnum(t), _alnum(wanted)
+            if len(b) > 6 and (b in a or a in b):
+                return o
+        if len(candidates) == 1:                    # only one thing to choose
+            return candidates[0][0]
+        return None
+
+    chosen = pick()
+    if chosen is None:
+        # Do not leave uncommitted text sitting in a typeahead — it disappears
+        # on blur and reads back empty, which looks like the write silently
+        # failed rather than like no option matched.
+        if _is_input(locator):
+            locator.fill("")
+        raise RuntimeError(f"no option matching {wanted!r} among {[t for _, t in candidates][:8]}")
+
+    chosen.click()
+    page.wait_for_timeout(300)
 
 
 def _write(page, locator, field: FormField, value) -> None:

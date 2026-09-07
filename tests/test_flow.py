@@ -118,3 +118,39 @@ def test_the_form_is_still_filled_before_handing_over(ctx):
     page.goto(url("wizard_page2.html"))
     run_application(page, planner=StubPlanner())
     assert page.input_value("#b") == "x"
+
+
+def test_a_consent_dialog_is_dismissed_so_clicks_land(ctx):
+    """A privacy dialog intercepting pointer events makes every click time out
+    with a log that says the element is "visible, enabled and stable"."""
+    from job_agent.flow import dismiss_overlays
+
+    page = ctx.new_page()
+    page.goto(url("consent_dialog.html"))
+    assert page.locator("#backdrop").count() == 1
+
+    closed = dismiss_overlays(page)
+
+    assert closed == 1
+    assert page.locator("#backdrop").count() == 0
+
+
+def test_overlay_dismissal_never_clicks_a_dangerous_button(ctx):
+    """The dismisser uses an allowlist, so it cannot press Submit or Apply."""
+    from job_agent.flow import CONSENT_WORDS
+
+    for dangerous in ["Submit", "Apply", "Apply Now", "Delete", "Send application"]:
+        assert not CONSENT_WORDS.match(dangerous), dangerous
+    for safe in ["OK", "Accept all", "I agree", "Got it"]:
+        assert CONSENT_WORDS.match(safe), safe
+
+
+def test_a_blocked_navigation_click_does_not_crash(ctx):
+    """An exception here would close the browser and discard hand-typed work."""
+    page = ctx.new_page()
+    page.set_content(
+        "<div role='dialog' style='position:fixed;inset:0;z-index:9'>blocked</div>"
+        "<button>Next</button><input aria-label='Name'>"
+    )
+    result = run_application(page, planner=StubPlanner(), max_pages=2)
+    assert result.outcome in {"ready_for_human", "needs_human", "guard_tripped"}
