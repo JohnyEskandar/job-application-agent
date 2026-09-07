@@ -24,6 +24,7 @@ class Identity(Strict):
 
 
 class Location(Strict):
+    street: str | None = None
     city: str
     state: str
     country: str = "United States"
@@ -88,6 +89,9 @@ class Documents(Strict):
 
 class Preferences(Strict):
     desired_salary: str | None = None
+    # Some answers are conditional — "leave blank unless the form demands it".
+    # A bare value cannot express that, so the policy is its own field.
+    salary_policy: str | None = None
     earliest_start_date: str | None = None
     notice_period: str | None = None
     remote_preference: str | None = None
