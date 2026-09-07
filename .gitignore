@@ -1,7 +1,7 @@
 # secrets and personal data
 .env
 profile.yaml
-docs/resume.pdf
+docs/*.pdf
 
 # run artifacts (screenshots contain PII)
 runs/

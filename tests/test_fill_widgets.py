@@ -90,3 +90,17 @@ def test_combobox_value_reads_an_input_based_combobox(ctx):
     page.set_content('<input role="combobox" aria-label="Country" value="+1 US" />')
     loc = page.get_by_role("combobox", name="Country", exact=True)
     assert combobox_value(loc) == "+1 US"
+
+
+def test_a_filename_with_spaces_and_commas_uploads(ctx, tmp_path):
+    """Résumés are named "Lastname, Firstname Resume.pdf" on purpose — that
+    filename is what a recruiter sees. Commas and spaces must survive."""
+    awkward = tmp_path / "Eskandar, Johny Resume.pdf"
+    awkward.write_bytes(b"%PDF-1.4 fake")
+
+    page = ctx.new_page()
+    page.goto(WIDGETS)
+    upload_file(page, page.locator("#cv"), awkward)
+
+    name = page.eval_on_selector("#cv", "e => e.files[0].name")
+    assert name == "Eskandar, Johny Resume.pdf"

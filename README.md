@@ -141,7 +141,9 @@ cp .env.example .env          # add your key from console.anthropic.com
 cp profile.example.yaml profile.yaml   # fill in your real details
 ```
 
-Put your résumé at `docs/resume.pdf`. Both `.env` and `profile.yaml` are
+Put your résumé in `docs/` and point `profile.yaml` at it. Name it the way
+you want a recruiter to see it — `docs/Lastname, Firstname Resume.pdf` rather
+than `resume.pdf`, since that filename travels with the upload. Both `.env` and `profile.yaml` are
 gitignored, along with `runs/` (screenshots) and `browser-profile/` (cookies).
 
 **Set a spend cap** at console.anthropic.com → Settings → Limits. A whole job

@@ -48,6 +48,11 @@ skills:
   - TypeScript
   - React
 
+documents:
+  # The filename a recruiter sees when they download it. "resume.pdf" is
+  # anonymous; "Lastname, Firstname Resume.pdf" is not.
+  resume: "docs/Kim, Alex Resume.pdf"
+
 preferences:
   desired_salary: "Open to discussion"
   earliest_start_date: "2026-06-01"
