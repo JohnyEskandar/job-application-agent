@@ -8,7 +8,7 @@ thing being learned. Stage 8.5 ports it to LangGraph and compares.
 from dataclasses import dataclass
 
 from job_agent.config import MAX_TOKENS, MODEL
-from job_agent.stage1.tools import dispatch_tool
+from job_agent.stage1.dispatch import dispatch_tool
 
 # No `thinking` here — MODEL is Haiku 4.5, which rejects adaptive thinking.
 # Stage 5 switches the planner to PLANNER_MODEL and turns it on there.

@@ -224,6 +224,48 @@ stops and asks.
 
 ---
 
+## Stage 2 — the profile stopped being a tool
+
+Deleted `stage1/tools.py` and moved the profile into the system prompt behind a
+`cache_control` breakpoint. This is the payoff for building Stage 1 the wrong
+way on purpose.
+
+### Measured result
+
+| | Stage 1 (tool) | Stage 2 (context) |
+|---|---|---|
+| turns to answer | 2 | **1** |
+| round-trips | ask -> tool_use -> run -> answer | ask -> answer |
+
+The round-trip is gone. Claude no longer has to request the profile and wait —
+it's already in front of it on every call.
+
+### Caching didn't kick in, and the reason is worth knowing
+
+`cache_creation_input_tokens` and `cache_read_input_tokens` were both **0** on
+both runs. Not a bug: **the minimum cacheable prefix is ~1024 tokens**, and my
+system prompt is currently 1,156 characters (~289 tokens) because
+`profile.yaml` still has `experience: []` and `skills: []`.
+
+Under the threshold, caching silently does not happen. No error, no warning
+from the API — just zeros. I added an explicit size check to the demo so it
+says so out loud instead of looking broken.
+
+TODO: fill in profile.yaml properly, rerun, record the real numbers here.
+
+### The safety instruction actually worked
+
+`profile.yaml` has `status: "VERIFY - ..."` in the work authorization block.
+Asked whether the candidate needs sponsorship, the model answered the boolean
+fields but **explicitly flagged that the status needs verification** rather than
+inventing "US Citizen."
+
+That's the `Never infer work authorization, salary, dates, or GPA` rule in the
+system prompt doing its job. Worth remembering that a prompt rule is only as
+good as its test — this was the first evidence it holds.
+
+---
+
 ## What's next
 
 **Stage 2** — profile out of a tool and into a cached system prompt.

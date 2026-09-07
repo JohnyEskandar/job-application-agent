@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from job_agent.stage1.loop import ConversationResult, run_conversation
-from job_agent.stage1.tools import UnknownToolError
+from job_agent.stage1.dispatch import UnknownToolError
 
 
 # --- fakes: stand-ins for the shapes the SDK returns -----------------------
