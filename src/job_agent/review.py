@@ -26,7 +26,9 @@ def render_review(snapshot: FormSnapshot, plan: FillPlan, report: FillReport, sc
         name = field.accessible_name if field else planned.field_id
         result = outcomes.get(planned.field_id)
         status = ""
-        if result and result.outcome != "verified":
+        if result and result.outcome == "normalized":
+            status = f"   (site reformatted to {result.observed!r})"
+        elif result and result.outcome != "verified":
             status = f"   FAILED ({result.outcome}: saw {result.observed!r})"
         flag = "   <-- REVIEW" if planned.source == "generated" else ""
         lines.append(

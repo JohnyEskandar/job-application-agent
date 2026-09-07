@@ -65,3 +65,28 @@ def test_execute_plan_routes_the_file_kind(ctx):
         confidence=1.0, note="t"
     )]))
     assert report.results[0].outcome == "verified", report.results[0]
+
+
+def test_a_combobox_already_holding_the_wanted_value_is_left_alone(ctx):
+    """Opening a searchable combobox we do not need to change is how the live
+    phone country-code selector failed."""
+    page = ctx.new_page()
+    page.goto(WIDGETS)
+    page.eval_on_selector("#fav", "el => el.textContent = 'Blue'")
+    snap = extract_snapshot(page)
+    field = next(f for f in snap.fields if f.kind == "combobox")
+
+    # would raise if it tried to open and find an option
+    choose_in_custom_combobox(page, locator_for(page, field), "Blue")
+    assert page.locator("#fav").inner_text().strip() == "Blue"
+
+
+def test_combobox_value_reads_an_input_based_combobox(ctx):
+    """<input role=combobox> keeps its value in .value and has no inner text.
+    Reading inner_text() there returns '' and looks like an empty field."""
+    from job_agent.fill import combobox_value
+
+    page = ctx.new_page()
+    page.set_content('<input role="combobox" aria-label="Country" value="+1 US" />')
+    loc = page.get_by_role("combobox", name="Country", exact=True)
+    assert combobox_value(loc) == "+1 US"

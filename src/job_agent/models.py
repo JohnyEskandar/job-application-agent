@@ -206,7 +206,11 @@ class FillPlan(Strict):
 
 # --- filling -----------------------------------------------------------------
 
-FillOutcome = Literal["verified", "mismatch", "error", "skipped"]
+# "normalized" = the form reformatted our value but kept its content, e.g. an
+# input mask turning "(555) 010-0100" into "555-010-0100". Not a failure — the
+# site's formatting is its prerogative — but recorded distinctly so a real
+# mismatch never hides behind it.
+FillOutcome = Literal["verified", "normalized", "mismatch", "error", "skipped"]
 
 
 class FieldResult(Strict):
@@ -223,6 +227,10 @@ class FillReport(Strict):
     @property
     def verified(self) -> list[FieldResult]:
         return [r for r in self.results if r.outcome == "verified"]
+
+    @property
+    def normalized(self) -> list[FieldResult]:
+        return [r for r in self.results if r.outcome == "normalized"]
 
     @property
     def failures(self) -> list[FieldResult]:

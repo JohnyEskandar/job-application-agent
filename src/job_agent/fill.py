@@ -30,6 +30,23 @@ def upload_file(page, locator, path) -> None:
     locator.set_input_files(str(Path(path)))
 
 
+def _is_input(locator) -> bool:
+    return locator.evaluate("e => e.tagName.toLowerCase()") == "input"
+
+
+def combobox_value(locator) -> str:
+    """Read a combobox regardless of how it is built.
+
+    Two shapes exist in the wild and they store their value in different
+    places: <div role=combobox> displays it as text, while
+    <input role=combobox> keeps it in .value and has no inner text at all.
+    Reading the wrong one returns "" and looks like an empty field.
+    """
+    if _is_input(locator):
+        return (locator.input_value() or "").strip()
+    return (locator.inner_text() or "").strip()
+
+
 def choose_in_custom_combobox(page, locator, value: str) -> None:
     """Open a div-based combobox and click the matching option.
 
@@ -37,10 +54,32 @@ def choose_in_custom_combobox(page, locator, value: str) -> None:
     component libraries — render dropdowns as divs, so the only way in is to
     drive it the way a person would: click to open, click the option.
     """
+    wanted = str(value).strip()
+
+    # If it already holds what we want, leave it alone. Opening a searchable
+    # combobox we do not need to change is how the phone country-code selector
+    # failed: its option list is filtered by typing, so an exact-name click
+    # never resolves.
+    if combobox_value(locator) == wanted:
+        return
+
     locator.click()
-    option = page.get_by_role("option", name=str(value), exact=True)
-    option.wait_for(state="visible", timeout=5000)
-    option.click()
+
+    # A searchable combobox needs the text typed before its options exist.
+    if _is_input(locator):
+        locator.fill(wanted)
+        page.wait_for_timeout(400)
+
+    option = page.get_by_role("option", name=wanted, exact=True)
+    try:
+        option.wait_for(state="visible", timeout=4000)
+        option.click()
+    except Exception:
+        # No matching option. For a searchable input the typed text may itself
+        # be the value; for a div it is a genuine failure, which read-back
+        # will catch.
+        if not _is_input(locator):
+            raise
 
 
 def _write(page, locator, field: FormField, value) -> None:
@@ -64,8 +103,7 @@ def _read_back(page, locator, field: FormField) -> str:
     if field.kind in {"checkbox", "radio"}:
         return "true" if locator.is_checked() else "false"
     if field.kind == "combobox":
-        # a div has no value — what it displays IS its value
-        return (locator.inner_text() or "").strip()
+        return combobox_value(locator)
     if field.kind == "file":
         # the intended value is a path, but the only thing worth verifying is
         # that a file actually got attached
@@ -73,14 +111,29 @@ def _read_back(page, locator, field: FormField) -> str:
     return locator.input_value()
 
 
-def _matches(field: FormField, intended: str, observed: str) -> bool:
+def _alnum(text: str) -> str:
+    return "".join(c for c in text.lower() if c.isalnum())
+
+
+def _compare(field: FormField, intended: str, observed: str) -> str:
+    """verified | normalized | mismatch."""
     if field.kind == "file":
         # a path can never equal "attached"; the attachment is the success
-        return observed == "attached"
+        return "verified" if observed == "attached" else "mismatch"
+
     if field.kind == "select":
         # a <select> reports its VALUE; the plan names the visible LABEL
-        return observed.strip().lower() == intended.strip().lower()
-    return observed.strip() == intended.strip()
+        return "verified" if observed.strip().lower() == intended.strip().lower() else "mismatch"
+
+    if observed.strip() == intended.strip():
+        return "verified"
+
+    # Differs only in punctuation or spacing: the form applied an input mask
+    # or trimmed something. The content survived, so this is not a failure.
+    if _alnum(observed) == _alnum(intended) and _alnum(intended):
+        return "normalized"
+
+    return "mismatch"
 
 
 def order_for_execution(snapshot: FormSnapshot, planned: list[PlannedField]) -> list[PlannedField]:
@@ -162,9 +215,11 @@ def _execute_one(page, field: FormField | None, planned: PlannedField) -> FieldR
             detail=f"could not read back: {type(exc).__name__}: {exc}"[:200],
         )
 
+    outcome = _compare(field, intended, observed)
     return FieldResult(
         field_id=planned.field_id,
-        outcome="verified" if _matches(field, intended, observed) else "mismatch",
+        outcome=outcome,
         intended=intended,
         observed=observed,
+        detail="form reformatted the value; content unchanged" if outcome == "normalized" else None,
     )

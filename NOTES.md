@@ -389,6 +389,73 @@ is which, and being wrong about that is exactly the failure being avoided.
 
 ---
 
+## Stages 6 and 7 — filling the form and the approval gate
+
+The agent can now fill a real application and stop for approval. Ran it against
+the live Edgehog form: 9 fields filled from the profile, 7 routed to me,
+nothing submitted.
+
+### Read-back verification earned its keep on the first live run
+
+Two failures surfaced immediately that no amount of "it looked fine" would have
+caught:
+
+**A phone input mask.** Wrote `(555) 010-0100`, the field held `555-010-0100`.
+The form strips punctuation on input. The *content* survived — this is the
+site's formatting prerogative, not a failure. Flagging it FAILED is noise, and
+noise is how you learn to ignore real failures.
+
+Added a `normalized` outcome: if the values differ only in punctuation and
+whitespace, the content survived. A test asserts that truncation (`Johnathan` ->
+`Joh`) is still a `mismatch`, because truncation changes alphanumerics and so
+cannot hide as normalization.
+
+**Two kinds of combobox.** The phone country-code selector errored. It turned
+out to be an `<input role="combobox">`, while the ones I had handled were
+`<div role="combobox">`. They store their value in different places:
+
+| shape | value lives in |
+|---|---|
+| `<div role=combobox>` | inner text |
+| `<input role=combobox>` | `.value`; inner text is `""` |
+
+Reading the wrong one returns `""`, which looks exactly like an empty field. So
+the code decided the already-correct `+1 US` needed changing, opened a
+searchable dropdown whose options only exist after you type, and timed out.
+
+Two fixes: read the value according to the element's shape, and **no-op when
+the combobox already holds the wanted value.** The second is the more general
+lesson — the safest way to handle a widget is often not to touch it.
+
+### The load-bearing test
+
+```python
+def test_the_flow_never_submits_without_approval(ctx):
+    submitted = []
+    run_application(page, planner=..., decide=lambda *_: "abandon",
+                    submit=lambda *_: submitted.append(True))
+    assert submitted == []
+```
+
+`submit` is **injected, not imported**, purely so this test can exist. A second
+test runs every non-approval answer — `""`, `None`, `"yes"`, `"SUBMIT "` with a
+trailing space — and asserts each abandons. Production has exactly one
+`submit(page)` call site, inside the approval branch.
+
+### --dry-run
+
+`scripts/apply.py --dry-run` fills everything, prints the review screen, and
+always abandons. Full pipeline, zero risk, no keypress. It is how the two bugs
+above were found, and it is the right way to try a new posting.
+
+### Still open
+
+- The second file upload has no label saying what it is (cover letter?
+  transcript?). The planner correctly refuses to guess.
+- The live page shows 16 fields, the committed fixture 18. Unresolved.
+
+---
+
 ## Retrospective — Stages 4 and 5
 
 Hypotheses under test:

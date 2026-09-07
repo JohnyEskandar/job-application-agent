@@ -2,6 +2,7 @@
 
 Run:  python scripts/apply.py <application-url>
       python scripts/apply.py <url> --headless
+      python scripts/apply.py <url> --dry-run    # print the review, always abandon
 
 There is no --yes flag and no timeout. Nothing is submitted unless you type s.
 """
@@ -16,7 +17,7 @@ from job_agent.config import PROJECT_ROOT, require_api_key
 from job_agent.flow import run_application
 from job_agent.plan import build_plan
 from job_agent.profile import load_profile
-from job_agent.review import ask
+from job_agent.review import ask, render_review
 
 
 def main() -> None:
@@ -36,9 +37,16 @@ def main() -> None:
         page.goto(url, wait_until="domcontentloaded")
         page.wait_for_timeout(3000)
 
+        dry_run = "--dry-run" in sys.argv
+
         def decide(snapshot, plan, report):
             shot = run_dir / f"page{len(list(run_dir.glob('*.png'))) + 1}.png"
             page.screenshot(path=str(shot))
+            if dry_run:
+                # Show what would happen, then refuse. No keypress, no submit.
+                print(render_review(snapshot, plan, report, str(shot)))
+                print("  > [dry run — abandoning]")
+                return "abandon"
             return ask(snapshot, plan, report, str(shot))
 
         result = run_application(

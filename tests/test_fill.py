@@ -103,3 +103,32 @@ def test_attention_check_fields_are_never_filled_even_if_planned(ctx):
     report = execute_plan(page, snap, FillPlan(fields=[planned]))
     assert report.results[0].outcome == "skipped"
     assert page.input_value("#first_name") == ""
+
+
+def test_an_input_mask_reformatting_our_value_is_normalized_not_failed(ctx):
+    """A form that strips punctuation kept our content. Not a failure."""
+    page = ctx.new_page()
+    page.goto(SIMPLE)
+    page.eval_on_selector(
+        "#first_name",
+        "el => el.addEventListener('input', () => { el.value = el.value.replace(/[^a-zA-Z0-9]/g, ''); })",
+    )
+    snap = extract_snapshot(page)
+    report = execute_plan(page, snap, FillPlan(fields=[plan_for(snap, "First name", "(555) 010-0100")]))
+
+    assert report.results[0].outcome == "normalized"
+    assert report.ok, "normalization must not count as a failure"
+
+
+def test_content_actually_changing_is_still_a_mismatch(ctx):
+    """Truncation changes alphanumerics, so it cannot hide as normalization."""
+    page = ctx.new_page()
+    page.goto(SIMPLE)
+    page.eval_on_selector(
+        "#first_name", "el => el.addEventListener('input', () => { el.value = el.value.slice(0, 3); })"
+    )
+    snap = extract_snapshot(page)
+    report = execute_plan(page, snap, FillPlan(fields=[plan_for(snap, "First name", "Johnathan")]))
+
+    assert report.results[0].outcome == "mismatch"
+    assert not report.ok
