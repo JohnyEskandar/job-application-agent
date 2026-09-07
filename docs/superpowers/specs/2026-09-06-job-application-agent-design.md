@@ -59,7 +59,7 @@ an agent framework that hides the loop.
 | Agent loop | hand-written, no framework | It is the thing being learned. No LangChain, no Tool Runner in v1 |
 | Field decisions | LLM plans, code executes | The model never clicks. It emits a plan; Playwright runs it and verifies |
 | Static profile | system prompt, **not** a tool | Needed every turn, cheap to include, and prompt-cacheable |
-| Submission | human approval gate, always | An application cannot be un-sent |
+| Submission | **the agent cannot submit** | Fill-only. Not a default that can be flipped — there is no submit code. The value is the typing, not the clicking, and an application cannot be un-sent |
 | Storage | YAML profile + JSONL run log + screenshot dirs | No schema migrations, greppable, readable in a text editor |
 
 ### 3.1 Why the profile is not a tool

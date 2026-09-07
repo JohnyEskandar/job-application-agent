@@ -57,7 +57,7 @@ def test_the_loop_advances_through_a_two_page_wizard(ctx):
     page = ctx.new_page()
     page.goto(url("wizard_page1.html"))
     planner = StubPlanner()
-    result = run_application(page, planner=planner, decide=lambda *_: "abandon")
+    result = run_application(page, planner=planner)
 
     assert planner.calls == 2, "planned page 1 and page 2"
     assert result.pages_visited == 2
@@ -66,53 +66,55 @@ def test_the_loop_advances_through_a_two_page_wizard(ctx):
 def test_the_page_cap_is_enforced(ctx):
     page = ctx.new_page()
     page.goto(url("wizard_page1.html"))
-    result = run_application(
-        page, planner=StubPlanner(), decide=lambda *_: "abandon", max_pages=1
-    )
+    result = run_application(page, planner=StubPlanner(), max_pages=1)
     assert result.pages_visited == 1
-    assert result.outcome in {"guard_tripped", "abandoned"}
+    assert result.outcome in {"guard_tripped", "ready_for_human"}
 
 
-def test_the_flow_never_submits_without_approval(ctx):
-    """The load-bearing test of this entire project."""
+def test_run_application_has_no_submit_parameter():
+    """The agent cannot submit. Not "does not by default" — cannot.
+
+    Removing the capability rather than defaulting it off means there is no
+    flag, no config, and no callable that could turn it back on by accident.
+    """
+    import inspect
+
+    params = inspect.signature(run_application).parameters
+    assert "submit" not in params
+    assert not any("submit" in p.lower() for p in params)
+
+
+def test_no_module_clicks_a_submit_control():
+    """Structural guard: nothing in the package targets a submit/apply button.
+
+    Navigation clicks Next/Continue, extraction opens comboboxes, and filling
+    clicks options. None of those is a submit. This test exists so that
+    re-adding one has to be deliberate rather than incidental.
+    """
+    import re
+    from pathlib import Path
+
+    offenders = []
+    for path in sorted(Path("src/job_agent").glob("*.py")):
+        source = path.read_text()
+        for match in re.finditer(r"""name\s*=\s*["'](submit|apply)""", source, re.I):
+            line = source[: match.start()].count("\n") + 1
+            offenders.append(f"{path}:{line}")
+    assert not offenders, f"submit-targeting locator found: {offenders}"
+
+
+def test_reaching_a_page_with_a_submit_button_stops_and_hands_over(ctx):
     page = ctx.new_page()
     page.goto(url("wizard_page2.html"))
+    result = run_application(page, planner=StubPlanner())
 
-    submitted = []
-    result = run_application(
-        page,
-        planner=StubPlanner(),
-        decide=lambda *_: "abandon",
-        submit=lambda *_: submitted.append(True),
-    )
-    assert submitted == [], "submit was called without approval"
-    assert result.outcome == "abandoned"
+    assert result.outcome == "ready_for_human"
+    assert "yourself" in (result.detail or "").lower()
 
 
-def test_no_decision_other_than_submit_submits(ctx):
-    """Every non-'submit' answer must abandon, including a typo or None."""
-    for decision in ["abandon", "edit", "open", "", None, "SUBMIT ", "yes"]:
-        page = ctx.new_page()
-        page.goto(url("wizard_page2.html"))
-        submitted = []
-        run_application(
-            page,
-            planner=StubPlanner(),
-            decide=lambda *_, d=decision: d,
-            submit=lambda *_: submitted.append(True),
-        )
-        assert submitted == [], f"decision {decision!r} caused a submit"
-
-
-def test_approval_is_what_calls_submit(ctx):
+def test_the_form_is_still_filled_before_handing_over(ctx):
+    """Stopping short of submit must not mean stopping short of filling."""
     page = ctx.new_page()
     page.goto(url("wizard_page2.html"))
-
-    submitted = []
-    run_application(
-        page,
-        planner=StubPlanner(),
-        decide=lambda *_: "submit",
-        submit=lambda *_: submitted.append(True),
-    )
-    assert submitted == [True]
+    run_application(page, planner=StubPlanner())
+    assert page.input_value("#b") == "x"

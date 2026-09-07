@@ -1,14 +1,15 @@
-"""The human approval gate.
+"""The handoff summary.
 
-Everything the agent is about to submit, shown with where each value came
-from, so a wrong answer is visible before it is permanent. An application
-cannot be un-sent; this is the one place in the design where convenience
-loses.
+Everything the agent filled, shown with where each value came from, plus
+everything it refused to answer. The agent cannot submit — this is what it
+hands you before you take over the browser and finish.
 """
 
 from job_agent.models import FillPlan, FillReport, FormSnapshot
 
-VALID_DECISIONS = {"s": "submit", "e": "edit", "o": "open", "a": "abandon"}
+# Deliberately no "submit". The agent has no ability to submit an application;
+# this dict exists so that fact is visible in code, not just in a comment.
+VALID_DECISIONS: dict[str, str] = {}
 
 
 def render_review(snapshot: FormSnapshot, plan: FillPlan, report: FillReport, screenshot: str) -> str:
@@ -46,19 +47,12 @@ def render_review(snapshot: FormSnapshot, plan: FillPlan, report: FillReport, sc
     lines.append("")
     lines.append(f"  Screenshot: {screenshot}")
     lines.append("")
-    lines.append("  [s]ubmit   [e]dit a field   [o]pen the browser   [a]bandon")
+    lines.append("  The browser is open and it is yours now.")
+    lines.append("  Finish the fields above, check the rest, and submit it yourself.")
+    lines.append("  This agent cannot submit — by design.")
     return "\n".join(lines)
 
 
-def ask(snapshot: FormSnapshot, plan: FillPlan, report: FillReport, screenshot: str) -> str:
-    """Print the review and block until a human types a decision.
-
-    No default, no timeout. Pressing Enter alone re-prompts rather than
-    accepting anything.
-    """
+def show(snapshot: FormSnapshot, plan: FillPlan, report: FillReport, screenshot: str) -> None:
+    """Print the handoff summary. Asks nothing, decides nothing."""
     print(render_review(snapshot, plan, report, screenshot))
-    while True:
-        choice = input("  > ").strip().lower()
-        if choice in VALID_DECISIONS:
-            return VALID_DECISIONS[choice]
-        print("  please type s, e, o, or a")

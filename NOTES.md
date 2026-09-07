@@ -498,6 +498,44 @@ that was not there rather than something that was wrong.
 
 ---
 
+## Decision change: the agent cannot submit
+
+Originally designed as "fill everything, pause for approval, then submit."
+Changed to **fill-only** after the first real run.
+
+What prompted it: I pressed `s`, and the submit crashed — the code looked for a
+button named "Submit" while Rippling calls its button "Apply". The snapshot had
+recorded `submit_buttons: ['Apply']` correctly; apply.py ignored it and used a
+hardcoded guess. Nothing was sent, but the crash closed the browser and threw
+away the attention-check answer I had typed by hand.
+
+Two lessons, and only one of them is about the bug.
+
+**The small one:** never hardcode what the snapshot already knows. The
+extractor had the right answer and the caller substituted a guess.
+
+**The real one:** the submit click was the least valuable part of the system
+and carried all of the risk. The agent typing 14 fields correctly is the whole
+benefit. Clicking one button afterwards saves a second and creates the only
+irreversible action in the design.
+
+So the capability is **removed, not defaulted off**:
+
+- `run_application` has no `submit` parameter — a test asserts that by
+  inspecting its signature
+- no module targets a submit or apply control — a test greps the package and
+  fails if one appears
+- `VALID_DECISIONS` in review.py is `{}` — a test asserts it is empty
+- the review screen is a handoff summary, not a prompt
+
+Removing a capability is stronger than disabling it. A default can be flipped
+by a flag, a config, or a future edit that seemed reasonable at the time. There
+is nothing here to flip.
+
+The browser stays open when the run ends so nothing typed by hand is lost.
+
+---
+
 ## Retrospective — Stages 4 and 5
 
 Hypotheses under test:

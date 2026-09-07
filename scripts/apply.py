@@ -1,10 +1,11 @@
-"""Apply to a job posting. Stops for your approval before submitting.
+"""Fill in a job application. You submit it yourself.
 
 Run:  python scripts/apply.py <application-url>
-      python scripts/apply.py <url> --headless
-      python scripts/apply.py <url> --dry-run    # print the review, always abandon
+      python scripts/apply.py <url> --headless    # no window; nothing to finish
 
-There is no --yes flag and no timeout. Nothing is submitted unless you type s.
+This agent CANNOT submit an application. It fills what it can from your
+profile, tells you what it refused to answer and why, and leaves the browser
+open for you to finish and submit.
 """
 
 import sys
@@ -17,7 +18,7 @@ from job_agent.config import PROJECT_ROOT, require_api_key
 from job_agent.flow import run_application
 from job_agent.plan import build_plan
 from job_agent.profile import load_profile
-from job_agent.review import ask, render_review
+from job_agent.review import show
 
 
 def main() -> None:
@@ -26,40 +27,34 @@ def main() -> None:
     if not args:
         raise SystemExit("usage: python scripts/apply.py <url> [--headless]")
     url = args[0]
+    headless = "--headless" in sys.argv
 
     profile = load_profile()
     client = anthropic.Anthropic()
     run_dir = PROJECT_ROOT / "runs" / datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    with browser_context(headless="--headless" in sys.argv) as ctx:
+    with browser_context(headless=headless) as ctx:
         page = ctx.new_page()
         page.goto(url, wait_until="domcontentloaded")
         page.wait_for_timeout(3000)
 
-        dry_run = "--dry-run" in sys.argv
-
-        def decide(snapshot, plan, report):
+        def on_page(snapshot, plan, report):
             shot = run_dir / f"page{len(list(run_dir.glob('*.png'))) + 1}.png"
             page.screenshot(path=str(shot))
-            if dry_run:
-                # Show what would happen, then refuse. No keypress, no submit.
-                print(render_review(snapshot, plan, report, str(shot)))
-                print("  > [dry run — abandoning]")
-                return "abandon"
-            return ask(snapshot, plan, report, str(shot))
+            show(snapshot, plan, report, str(shot))
 
-        result = run_application(
-            page,
-            planner=lambda snapshot: build_plan(client, snapshot, profile),
-            decide=decide,
-            submit=lambda p: p.get_by_role("button", name="Submit").first.click(),
-        )
+        result = run_application(page, planner=lambda s: build_plan(client, s, profile),
+                                 on_page=on_page)
 
-    print(f"\noutcome: {result.outcome}  ({result.pages_visited} pages)")
-    if result.detail:
-        print(f"detail:  {result.detail}")
-    print(f"run dir: {run_dir}")
+        print(f"\n  {result.pages_visited} page(s) filled — {result.detail or result.outcome}")
+
+        if not headless:
+            # Hold the window open. Anything typed by hand is still there, and
+            # closing it silently would discard that work.
+            input("\n  Take it from here. Press Enter when you are done to close the browser. > ")
+
+    print(f"  screenshots: {run_dir}")
 
 
 if __name__ == "__main__":

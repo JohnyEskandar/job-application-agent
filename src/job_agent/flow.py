@@ -1,10 +1,16 @@
 """The page loop.
 
+**This agent cannot submit an application.** There is no submit callable, no
+click on a submit control, and no code path that could add one without being
+written on purpose. It fills what it can, stops when it reaches a page with a
+submit button, and hands the browser to the human — who reviews, finishes the
+remaining fields, and clicks the button themselves.
+
+That is a deliberate product decision, not a limitation. An application cannot
+be un-sent, and the value here is the typing, not the clicking.
+
 Agent loops do not usually fail by giving a wrong answer. They fail by never
 terminating. Hence the two guards.
-
-`submit` is injected rather than imported, so a test can prove the loop never
-calls it without approval — and so production has exactly one call site.
 """
 
 import re
@@ -27,7 +33,8 @@ EDITABLE = (
 
 @dataclass
 class FlowResult:
-    outcome: str                       # submitted | abandoned | needs_human | guard_tripped
+    # ready_for_human = filled as far as it can; the human finishes and submits
+    outcome: str                       # ready_for_human | needs_human | guard_tripped
     pages_visited: int = 0
     reports: list = dc_field(default_factory=list)
     detail: str | None = None
@@ -63,16 +70,15 @@ def run_application(
     page,
     *,
     planner,
-    decide,
-    submit=None,
+    on_page=None,
     max_pages: int = 12,
     max_repeats: int = 3,
 ) -> FlowResult:
-    """Walk the application until it is submitted, abandoned, or guarded out.
+    """Fill the application as far as it can, then stop.
 
-    `planner(snapshot) -> FillPlan`, `decide(snapshot, plan, report) -> str`,
-    and `submit(page)` are injected so the whole loop is testable offline and
-    so submission has exactly one caller.
+    `planner(snapshot) -> FillPlan` decides values; `on_page(snapshot, plan,
+    report)` is an optional callback for reporting progress. Neither can
+    submit — there is nothing here to submit with.
     """
     seen: dict[str, int] = {}
     reports = []
@@ -84,7 +90,8 @@ def run_application(
         if kind == "login":
             return FlowResult("needs_human", pages, reports, "login required")
         if kind == "confirmation":
-            return FlowResult("submitted", pages, reports, "confirmation page reached")
+            # We never submit, so reaching this means the human already did.
+            return FlowResult("ready_for_human", pages, reports, "already submitted")
         if kind == "unknown":
             return FlowResult("needs_human", pages, reports, "could not classify page")
 
@@ -101,15 +108,19 @@ def run_application(
         report = execute_plan(page, snapshot, plan)
         reports.append(report)
 
+        if on_page is not None:
+            on_page(snapshot, plan, report)
+
+        # A page with a submit control is the end of the agent's job. It fills;
+        # the human submits.
         if snapshot.submit_buttons:
-            decision = decide(snapshot, plan, report)
-            if decision == "submit":
-                if submit is not None:
-                    submit(page)
-                return FlowResult("submitted", pages, reports)
-            return FlowResult("abandoned", pages, reports, f"decision={decision}")
+            return FlowResult(
+                "ready_for_human", pages, reports,
+                f"filled and stopped. Submit it yourself with the "
+                f"{snapshot.submit_buttons[0]!r} button.",
+            )
 
         if not _click_first(page, [r"\bnext\b", r"\bcontinue\b"]):
-            return FlowResult("needs_human", pages, reports, "no way to advance")
+            return FlowResult("ready_for_human", pages, reports, "no way to advance")
 
     return FlowResult("guard_tripped", pages, reports, f"hit the {max_pages}-page cap")

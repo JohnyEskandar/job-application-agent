@@ -62,7 +62,12 @@ def test_the_screenshot_path_is_shown():
     assert "runs/2026/page.png" in text
 
 
-def test_only_s_means_submit():
-    assert VALID_DECISIONS["s"] == "submit"
-    assert set(VALID_DECISIONS.values()) == {"submit", "edit", "open", "abandon"}
-    assert sum(1 for v in VALID_DECISIONS.values() if v == "submit") == 1
+def test_there_is_no_submit_decision_at_all():
+    """Not "submit is off by default" — there is no submit option to choose."""
+    assert VALID_DECISIONS == {}
+
+
+def test_the_summary_says_who_submits():
+    text = render_review(SNAP, PLAN, REPORT, screenshot="runs/x.png")
+    assert "cannot submit" in text.lower()
+    assert "yourself" in text.lower()
