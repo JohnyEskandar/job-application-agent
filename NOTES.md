@@ -315,7 +315,58 @@ undo stacks, event sourcing, React state, all the same trap.
 
 ## Stage 1 — chaining vs parallel (Task 5)
 
-<!-- Fill in after running scripts/chained_demo.py:
-     - Did my run chain across turns or parallelize in one? How could I tell?
-     - Why does the loop handle both without special-casing?
--->
+Asked something neither tool can answer alone: name a project from the resume
+that best demonstrates the major. Finished in **2 turns — parallel**, not
+chained.
+
+```
+[1] assistant text       "I'll retrieve the candidate's profile and resume..."
+[1] assistant tool_use   get_profile
+[1] assistant tool_use   get_resume_text     <- both in ONE assistant turn
+[2] user      tool_result {...profile...}
+[2] user      tool_result Johny Eskandar...  <- both in ONE user message
+[3] assistant text       the answer
+```
+
+**The tell:** both `tool_use` blocks in a single assistant turn, and
+`result.turns == 2`. Chained would have been 3 turns with one tool per turn.
+
+**Why parallel here:** the two lookups are independent. Neither call needs the
+other's result to be formed. If the question had been "find their major, then
+find a project matching *that* major," Claude would more likely have chained,
+because the second call depends on the first answer.
+
+My loop never asks which shape it's in — it just returns every result from a
+turn in one user message and goes again. Both cases fall out of the same code.
+
+### This run validated three things at once
+
+1. **Message [1] had a text block *and* two tool_use blocks.** If the code had
+   grabbed `content[0]` it would have taken the text block and crashed looking
+   for `.id`. Searching by block type is why it worked. Task 3's single
+   round-trip never produced this case — good reason to write the defensive
+   version before you can prove you need it.
+2. **Both results went back in one user message** — the thing
+   `test_parallel_tool_calls_return_in_a_single_user_message` asserted against
+   the fake, now confirmed against the real API.
+3. **The loop terminated on its own** via `stop_reason` flipping to
+   `end_turn`.
+
+<!-- TODO(me): my own read on why the loop generalizes — is there a case it
+     would NOT handle? worth thinking about before an interview. -->
+
+---
+
+## Stage 1 — done. What Stage 2 destroys
+
+Stage 2 deletes `stage1/tools.py` and moves the profile into the system prompt
+with a `cache_control` breakpoint. `run_conversation` survives; the profile
+tools do not.
+
+The measurement that justifies it: one fewer round-trip, and a non-zero
+`usage.cache_read_input_tokens` on the second run.
+
+Keeping both in git history on purpose. Started with the profile as a tool,
+measured that it cost a round-trip and the model could skip it, moved static
+context into the cached system prompt and kept tools for actions. The diff is
+the point — tools are verbs, context is nouns.
