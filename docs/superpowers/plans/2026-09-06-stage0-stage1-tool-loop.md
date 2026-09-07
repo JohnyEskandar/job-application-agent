@@ -51,7 +51,7 @@ uv init --lib --name job-agent --python 3.14
 
 Note: `uv init` may write its own `.gitignore`. Ours is already committed and covers more — if uv overwrites it, restore with `git checkout .gitignore`.
 
-- [ ] **Step 2: Add dependencies and create the venv**
+- [ ] **Step 3: Add dependencies and create the venv**
 
 ```bash
 uv add anthropic playwright pydantic python-dotenv pyyaml
@@ -59,7 +59,7 @@ uv add --dev pytest
 uv sync
 ```
 
-- [ ] **Step 3: Activate the venv and confirm the interpreter**
+- [ ] **Step 4: Activate the venv and confirm the interpreter**
 
 ```bash
 source .venv/bin/activate
@@ -69,7 +69,7 @@ python -c "import anthropic, playwright, job_agent; print('all imports OK')"
 
 Expected: `Python 3.14.7`, then `all imports OK`. This is the spec's Stage 0 exit criterion. From here on, `python` and `pytest` are the venv's — no `uv run` prefix needed.
 
-- [ ] **Step 4: Install the Chromium browser binary**
+- [ ] **Step 5: Install the Chromium browser binary**
 
 ```bash
 playwright install chromium
@@ -77,7 +77,7 @@ playwright install chromium
 
 Not used until Stage 3, but doing it now means Stage 3 opens with working code instead of a download.
 
-- [ ] **Step 5: Configure pytest in `pyproject.toml`**
+- [ ] **Step 6: Configure pytest in `pyproject.toml`**
 
 Append to `pyproject.toml` so bare `pytest` finds the suite from the repo root:
 
@@ -87,13 +87,13 @@ testpaths = ["tests"]
 addopts = "-q"
 ```
 
-- [x] **Step: `.gitignore`** — DONE, committed before the first commit so no secret can be in history. Verify it survived `uv init`:
+- [x] **Step 7: `.gitignore`** — DONE, committed before the first commit so no secret can be in history. Verify it survived `uv init`:
 
 ```bash
 grep -c "" .gitignore && grep -E '^\.env$|^profile\.yaml$' .gitignore
 ```
 
-- [ ] **Step: Put your real API key in `.env`**
+- [ ] **Step 8: Put your real API key in `.env`**
 
 `.env.example` is committed and `.env` already exists but is empty. Paste your key from https://console.anthropic.com/settings/keys into it:
 
@@ -102,7 +102,7 @@ echo 'ANTHROPIC_API_KEY=sk-ant-your-real-key-here' > .env
 git status --short   # .env must NOT appear
 ```
 
-- [ ] **Step 8: Write the failing test**
+- [ ] **Step 9: Write the failing test**
 
 `tests/test_config.py`:
 
@@ -135,12 +135,12 @@ def test_require_api_key_raises_a_useful_error_when_unset(monkeypatch):
         require_api_key()
 ```
 
-- [ ] **Step 9: Run the test to verify it fails**
+- [ ] **Step 10: Run the test to verify it fails**
 
 Run: `pytest tests/test_config.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'job_agent.config'`
 
-- [ ] **Step 10: Write `src/job_agent/config.py`**
+- [ ] **Step 11: Write `src/job_agent/config.py`**
 
 ```python
 """Project-wide configuration. Loads .env once, at import."""
@@ -170,12 +170,12 @@ def require_api_key() -> str:
     return key
 ```
 
-- [ ] **Step 11: Run the test to verify it passes**
+- [ ] **Step 12: Run the test to verify it passes**
 
 Run: `pytest tests/test_config.py -v`
 Expected: 5 passed
 
-- [ ] **Step 12: Start `NOTES.md`**
+- [ ] **Step 13: Start `NOTES.md`**
 
 ```markdown
 # Build Notes
@@ -192,7 +192,7 @@ One entry per stage: what surprised me, what broke, what I changed and why.
   it is correct; outside it, `python -m pip` is the safe form.
 ```
 
-- [ ] **Step 13: Verify nothing secret is staged, then commit**
+- [ ] **Step 14: Verify nothing secret is staged, then commit**
 
 ```bash
 git add -A
