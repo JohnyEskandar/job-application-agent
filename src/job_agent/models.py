@@ -170,3 +170,26 @@ class FormSnapshot(Strict):
         if len(ids) != len(set(ids)):
             raise ValueError("field_id values must be unique within a snapshot")
         return fields
+
+
+# --- planning ---------------------------------------------------------------
+
+ValueSource = Literal["profile", "answer_bank", "generated", "default"]
+
+
+class PlannedField(Strict):
+    field_id: str
+    value: str | bool | list[str]
+    source: ValueSource
+    confidence: float = Field(ge=0.0, le=1.0)
+    note: str
+
+
+class Unresolved(Strict):
+    field_id: str
+    reason: str
+
+
+class FillPlan(Strict):
+    fields: list[PlannedField] = Field(default_factory=list)
+    unresolved: list[Unresolved] = Field(default_factory=list)
