@@ -135,3 +135,32 @@ def test_locator_for_finds_a_checkbox(ctx):
     snap = extract_snapshot(page)
     field = next(f for f in snap.fields if f.kind == "checkbox")
     assert locator_for(page, field).count() == 1
+
+
+def test_repeated_accessible_names_get_distinct_occurrences(ctx):
+    """Workday repeats names heavily — five "Job Title", eight "Month". A
+    locator matching several elements is rejected outright, so without an
+    occurrence index every repeated field fails to write."""
+    page = ctx.new_page()
+    page.set_content(
+        "<label for='a'>Job Title</label><input id='a'>"
+        "<label for='b'>Job Title</label><input id='b'>"
+        "<label for='c'>Job Title</label><input id='c'>"
+    )
+    fields = [f for f in extract_snapshot(page).fields if f.accessible_name == "Job Title"]
+    assert [f.occurrence for f in fields] == [0, 1, 2]
+
+
+def test_each_repeated_field_resolves_to_exactly_one_element(ctx):
+    page = ctx.new_page()
+    page.set_content(
+        "<label for='a'>Year</label><input id='a' value='2023'>"
+        "<label for='b'>Year</label><input id='b' value='2027'>"
+    )
+    snap = extract_snapshot(page)
+    years = [f for f in snap.fields if f.accessible_name == "Year"]
+    assert len(years) == 2
+    for f in years:
+        assert locator_for(page, f).count() == 1
+    assert locator_for(page, years[0]).input_value() == "2023"
+    assert locator_for(page, years[1]).input_value() == "2027"

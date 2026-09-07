@@ -172,6 +172,11 @@ class FormField(Strict):
     # model never sees a selector and the field_id stays the only handle it
     # has. Format: "file:<n>" meaning the nth input[type=file] in DOM order.
     locator_hint: str | None = Field(default=None, exclude=True)
+    # Which occurrence of (role, accessible_name) this is, in DOM order.
+    # Workday repeats names heavily — five "Job Title", eight "Month" — and a
+    # locator matching several elements is rejected outright, so every one of
+    # those fields fails to write. Excluded from serialization: plumbing.
+    occurrence: int = Field(default=0, exclude=True)
 
     @model_validator(mode="after")
     def choice_fields_need_options(self):

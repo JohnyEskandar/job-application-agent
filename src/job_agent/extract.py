@@ -159,6 +159,8 @@ def extract_snapshot(page) -> FormSnapshot:
     fields: list[FormField] = []
     index = 0
     file_index = 0
+    # (role, accessible_name) -> how many we have seen so far
+    seen_names: dict[tuple[str, str], int] = {}
 
     for element in page.locator(CONTROL_SELECTOR).all():
         input_type = (element.get_attribute("type") or "").lower()
@@ -208,6 +210,10 @@ def extract_snapshot(page) -> FormSnapshot:
             hint = f"file:{file_index}"
             file_index += 1
 
+        key = (role, name)
+        occurrence = seen_names.get(key, 0)
+        seen_names[key] = occurrence + 1
+
         index += 1
         fields.append(
             FormField(
@@ -220,6 +226,7 @@ def extract_snapshot(page) -> FormSnapshot:
                 current_value=element.get_attribute("value") or None,
                 help_text=context[:300] if kind == "attention_check" else None,
                 locator_hint=hint,
+                occurrence=occurrence,
             )
         )
 
@@ -291,4 +298,9 @@ def locator_for(page, field: FormField):
     if field.locator_hint and field.locator_hint.startswith("file:"):
         n = int(field.locator_hint.split(":", 1)[1])
         return page.locator("input[type=file]").nth(n)
-    return page.get_by_role(field.role, name=field.accessible_name, exact=True)
+    # .nth() rather than a bare locator: Workday repeats accessible names, and
+    # a locator resolving to several elements is rejected — so without this
+    # every repeated field fails to write at all.
+    return page.get_by_role(field.role, name=field.accessible_name, exact=True).nth(
+        field.occurrence
+    )

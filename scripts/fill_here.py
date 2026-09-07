@@ -1,6 +1,7 @@
 """Fill whatever application form you have navigated to.
 
 Run:  python scripts/fill_here.py [starting-url]
+      python scripts/fill_here.py [url] --auto   # fill and advance without asking
 
 For sites the agent cannot reach on its own — anything behind a login, an
 account creation step, or a different flow shape like Eightfold's
@@ -32,16 +33,19 @@ def live_pages(ctx):
     return [p for p in ctx.pages if not p.is_closed()]
 
 
-def choose_page(ctx):
-    """Return the tab the human is most likely looking at.
+def choose_page(ctx, remembered=None):
+    """Return the tab the human is looking at, asking only when it is unclear.
 
-    Sites routinely open the real application in a new tab, so holding the
-    page object we created reads a stale page and looks like the agent is
-    doing nothing.
+    Sites routinely open the real application in a new tab, so holding the page
+    object we created reads a stale page and looks like nothing is happening.
+    But re-asking on every single page of a six-page form is its own kind of
+    misery, so the choice is remembered until that tab closes.
     """
     pages = [p for p in live_pages(ctx) if p.url not in ("about:blank", "")]
     if not pages:
         return None
+    if remembered is not None and remembered in pages:
+        return remembered
     if len(pages) == 1:
         return pages[0]
 
@@ -52,15 +56,16 @@ def choose_page(ctx):
         except Exception:
             print(f"    [{i}] (unreadable) {p.url[:56]}")
     choice = input(f"  Which one has the form? [1-{len(pages)}, Enter = last] > ").strip()
-    if choice.isdigit() and 1 <= int(choice) <= len(pages):
-        return pages[int(choice) - 1]
-    return pages[-1]
+    picked = pages[int(choice) - 1] if choice.isdigit() and 1 <= int(choice) <= len(pages) else pages[-1]
+    print("  (remembering this tab — it will not ask again unless it closes)")
+    return picked
 
 
 def main() -> None:
     require_api_key()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     start = args[0] if args else None
+    auto = "--auto" in sys.argv
 
     profile = load_profile()
     client = anthropic.Anthropic()
@@ -74,19 +79,28 @@ def main() -> None:
 
         print("\n  A browser window is open and it is yours.")
         print("  Log in, click through, get to the application form.")
-        print("  New tabs are fine — it reads whichever tab you point it at.\n")
+        print("  New tabs are fine — it reads whichever tab you point it at.")
+        if auto:
+            print("  --auto: it will fill and advance on its own once you press Enter once.")
+        print()
+
+        chosen = None
+        first = True
 
         while True:
-            try:
-                input("  Press Enter when a form is on screen (Ctrl-C to quit). > ")
-            except (KeyboardInterrupt, EOFError):
-                break
+            if first or not auto:
+                try:
+                    input("  Press Enter when a form is on screen (Ctrl-C to quit). > ")
+                except (KeyboardInterrupt, EOFError):
+                    break
+            first = False
 
             if not live_pages(ctx):
                 print("  Every tab is closed. Nothing left to read.\n")
                 break
 
-            target = choose_page(ctx)
+            target = choose_page(ctx, chosen)
+            chosen = target
             if target is None:
                 print("  No loaded page found. Navigate somewhere and try again.\n")
                 continue
@@ -101,6 +115,9 @@ def main() -> None:
                 continue
 
             if not snapshot.fields:
+                if auto:
+                    print("  No form fields here — stopping.\n")
+                    break
                 print("  No form fields on that page. Navigate further and try again.\n")
                 continue
 
@@ -114,6 +131,14 @@ def main() -> None:
             except Exception:
                 pass
             show(snapshot, plan, report, str(shot))
+
+            if auto:
+                if advance(target):
+                    target.wait_for_timeout(2000)
+                    print(f"\n  advanced to page {len(list(run_dir.glob('*.png'))) + 1}\n")
+                    continue
+                print("\n  No Continue button found — this is probably the last page.")
+                break
 
             print("\n  [c] click Continue / Save and continue, then fill the next page")
             print("  [m] I will navigate myself — fill again when I press Enter")

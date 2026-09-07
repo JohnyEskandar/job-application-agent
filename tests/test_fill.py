@@ -158,3 +158,25 @@ def test_a_checkbox_planned_false_is_left_unchecked(ctx):
     )]))
     assert page.is_checked("#c") is False
     assert report.results[0].outcome == "verified"
+
+
+def test_repeated_fields_are_written_independently(ctx):
+    """The Workday failure: 35 fields reporting 'error' because every locator
+    was ambiguous and nothing was written."""
+    page = ctx.new_page()
+    page.set_content(
+        "<label for='a'>Company</label><input id='a'>"
+        "<label for='b'>Company</label><input id='b'>"
+    )
+    snap = extract_snapshot(page)
+    companies = [f for f in snap.fields if f.accessible_name == "Company"]
+    plan = FillPlan(fields=[
+        PlannedField(field_id=companies[0].field_id, value="LinkedIn",
+                     source="profile", confidence=1.0, note="t"),
+        PlannedField(field_id=companies[1].field_id, value="Mastercard",
+                     source="profile", confidence=1.0, note="t"),
+    ])
+    report = execute_plan(page, snap, plan)
+    assert report.ok, [r for r in report.results if r.outcome != "verified"]
+    assert page.input_value("#a") == "LinkedIn"
+    assert page.input_value("#b") == "Mastercard"
