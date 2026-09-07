@@ -389,6 +389,101 @@ is which, and being wrong about that is exactly the failure being avoided.
 
 ---
 
+## Retrospective — Stages 4 and 5
+
+Hypotheses under test:
+
+- **Stage 4:** a page can be reduced to compact structured JSON via the
+  accessibility tree — cheaper and more reliable than screenshots.
+- **Stage 5:** given that JSON plus a profile, a model can decide what goes in
+  each field, with safety enforced in code rather than requested in a prompt.
+
+### What worked
+
+**The size claim, concretely.** An 18-field application form becomes **3.3KB of
+JSON**. A screenshot would be roughly an order of magnitude more tokens and
+carry no field structure. The DOM-over-vision decision stopped being an
+argument and became a number.
+
+**Role-based selectors survived the hashed names.** Rippling regenerates
+`name="4Za8M3kpmM"` per render; every label came through anyway, because
+nothing ever touched `name` or `id`.
+
+**`aria-required` answered Stage 3's open question.** First name `True`,
+LinkedIn `False` — available, just not from the HTML attribute.
+
+**The planner generated nothing.** Every filled value on both runs came back
+`source=profile`. Nothing invented.
+
+**Defense in depth got observed, not assumed.** The EEO fields were refused by
+the sensitive-pattern rule on one run and by the confidence floor on the other.
+Neither run needed both. That is the argument for redundant guards made by
+evidence rather than principle.
+
+### What went wrong
+
+**My first extractor silently skipped all five EEO fields and the attention
+check.** It queried `input, textarea, select`; Rippling renders dropdowns as
+`<div role="combobox">`. No error, no warning — those fields simply did not
+exist in the snapshot.
+
+This is the worst failure shape in the project: the agent would have submitted
+an application having never seen the legally-relevant questions, and nothing
+would have looked broken.
+
+**Fixing that caused a second bug.** Once the context walk got wide enough to
+find the attention question, it matched that pattern for *every* field — First
+name, Email, and LinkedIn all became `attention_check`, because the context
+blob contained the question. **Widening a search to find something makes it
+find things you did not want.** A shape, not just an instance.
+
+**I guessed the traversal depth and was wrong.** Wrote a 3-hop ancestor walk;
+the question is on the **eighth** ancestor — seven nested divs each containing
+only the word "Select". A magic number where a condition belonged.
+
+**The test structure was wrong.** A module-scoped browser fixture plus per-test
+contexts blew up: Playwright's sync API refuses to start a second
+`sync_playwright()` while one is live.
+
+**The first fixture I committed was broken.** 19 `<script>` tags, so it
+re-hydrated and wiped itself on reload — its `<form>` locator timed out. It was
+committed with a confident README about what it proved.
+
+### What we found that we were not looking for
+
+**Tag-based extraction is not suboptimal — it is structurally insufficient.**
+Any form built with a component library renders its selects as divs. Not a
+Rippling quirk; most of the modern web.
+
+**The resume parser normalizes rather than corrupts**, at least here. Three of
+seven fields differ; none are false.
+
+**But that finding is narrow.** This form collects only contact information —
+no employer, titles, dates, or education. That is the easy half of resume
+parsing. The horror stories are about work history, which this test never
+exercised. We measured the shallow end.
+
+### What it changes
+
+| Finding | Consequence |
+|---|---|
+| Custom ARIA widgets invisible to tag queries | Extraction must be role-based, permanently |
+| Context blob caused over-classification | Classification keys off the field's own label; context is a name fallback only |
+| Ancestor depth is unpredictable | Walk until a condition holds, never a fixed depth |
+| SPA fixtures re-hydrate | Strip scripts, and test that they are stripped |
+| Parser findings are contact-only | Do not generalize; work-history parsing is still untested |
+
+**Honest headline:** the two most valuable moments here were both bugs I
+introduced, and both were caught by tests asserting a **specific named thing
+must be present** — `"attention_check" in kinds`, `"Gender" in names` — rather
+than by reading output and deciding it looked fine.
+
+A test asserting "some fields were found" would have passed while five EEO
+questions quietly went missing. **Specific assertions catch silent omissions;
+generic ones do not.**
+
+---
+
 ## Retrospective — Stages 2 and 3
 
 Each stage was a hypothesis, not just a build.
