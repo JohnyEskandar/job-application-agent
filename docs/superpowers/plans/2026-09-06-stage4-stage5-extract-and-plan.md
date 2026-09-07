@@ -45,7 +45,28 @@ Measured against the real Edgehog application form, not assumed:
 
 Two findings that change behaviour, not just parsing:
 
-**1. The résumé is parsed to autofill.** The form says *"The résumé will be parsed to fill in the application details."* Uploading first and then filling only what's still empty is both less work and less likely to conflict with the site's own logic. Task 5 checks whether this actually happens.
+**1. The résumé is parsed to autofill — and résumé parsers are unreliable.**
+The form says *"The résumé will be parsed to fill in the application details."*
+The naive reading is "upload first, then fill only what is still empty."
+
+**That is wrong in the dangerous direction.** Parsers routinely mis-extract a
+name, mangle a phone format, or get dates approximately right — anyone who has
+used one ends up correcting fields afterwards. An agent that treats a
+pre-filled field as already handled would launder those mistakes into a
+submitted application and add automation on top.
+
+Correct ordering:
+
+1. **Upload the résumé first** — the form requires it, and going first means
+   the parser cannot overwrite our values later.
+2. **Re-extract.** Autofill changes the DOM; `current_value` now carries
+   whatever the parser guessed.
+3. **Overwrite every field the profile has a fact for**, whether or not
+   something is already in it. Ours land last, so ours win.
+4. **A pre-filled value the profile cannot confirm is `unresolved`, not done.**
+
+Rule four is the one that matters: **a non-empty field is not a correct
+field.**
 
 **2. This posting contains a human-attention check.** Verbatim:
 
@@ -310,6 +331,8 @@ class FormField(Strict):
     kind: FieldKind
     required: bool = False
     options: list[str] | None = None
+    # Whatever is already in the field — often the résumé parser's guess.
+    # A non-empty value is NOT evidence that the field is correct.
     current_value: str | None = None
     help_text: str | None = None
 
@@ -805,6 +828,43 @@ def test_build_plan_sends_the_snapshot_and_the_cached_profile():
     assert "f_01" in str(call["messages"])
 
 
+def test_endorsing_a_prefilled_value_we_cannot_confirm_is_refused():
+    snapshot = FormSnapshot(
+        url="https://x", page_title="t", page_kind="form",
+        fields=[
+            FormField(
+                field_id="f_10", role="textbox", accessible_name="Current employer",
+                kind="text", required=False, current_value="Acme Corp",
+            )
+        ],
+    )
+    raw = FillPlan(fields=[
+        PlannedField(field_id="f_10", value="Acme Corp", source="generated",
+                     confidence=0.9, note="already filled, looks fine"),
+    ])
+    safe = apply_safety_rules(raw, snapshot)
+    assert not safe.fields
+    assert any("parser" in u.reason.lower() for u in safe.unresolved)
+
+
+def test_profile_values_overwrite_a_prefilled_field():
+    snapshot = FormSnapshot(
+        url="https://x", page_title="t", page_kind="form",
+        fields=[
+            FormField(
+                field_id="f_11", role="textbox", accessible_name="First name",
+                kind="text", required=True, current_value="Jonathan",
+            )
+        ],
+    )
+    raw = FillPlan(fields=[
+        PlannedField(field_id="f_11", value="Johny", source="profile",
+                     confidence=0.99, note="from profile; parser guessed Jonathan"),
+    ])
+    safe = apply_safety_rules(raw, snapshot)
+    assert [f.value for f in safe.fields] == ["Johny"]
+
+
 def test_confidence_floor_is_documented_not_magic():
     assert 0.0 < CONFIDENCE_FLOOR < 1.0
 ```
@@ -858,6 +918,16 @@ you can answer, return an entry in `fields` with:
     to self-identify.
   - confidence: 0.0-1.0, your honest estimate.
   - note: one short line saying where the value came from.
+
+Some fields arrive with a `current_value` already in them, because the site
+parsed the candidate's résumé to prefill the form. Résumé parsers are
+unreliable. Treat `current_value` as a third party's guess, never as correct:
+
+- If the candidate facts cover that field, plan a value anyway. Yours
+  overwrites theirs.
+- If the facts do NOT cover it and `current_value` is non-empty, mark it
+  `unresolved`, saying it was prefilled and cannot be verified. Do not endorse
+  it.
 
 For anything you cannot answer from the facts, put it in `unresolved` with a
 reason. Leaving a field unresolved is always better than guessing.
@@ -917,6 +987,20 @@ def apply_safety_rules(plan: FillPlan, snapshot: FormSnapshot) -> FillPlan:
             unresolved.append(Unresolved(
                 field_id=planned.field_id,
                 reason=f"confidence {planned.confidence:.2f} below floor {CONFIDENCE_FLOOR}",
+            ))
+            continue
+
+        # A prefilled value the profile cannot confirm is unverified, not done.
+        if (
+            field.current_value
+            and planned.source not in {"profile", "answer_bank"}
+            and str(planned.value).strip() == field.current_value.strip()
+        ):
+            unresolved.append(Unresolved(
+                field_id=planned.field_id,
+                reason="prefilled by the site's résumé parser and not confirmable "
+                       "from the profile — parsers get fields wrong, so a human "
+                       "must check this one",
             ))
             continue
 
@@ -1034,9 +1118,22 @@ Compare with the fixture run. Differences mean the fixture has drifted from the 
 
 The posting URL is `en-CA` while the job is in Chicago. Look at what the live form actually asks about work eligibility — Canadian or US. Record the answer in `NOTES.md`; it determines which `work_authorization` fields matter in Stage 6.
 
-- [ ] **Step 5: Check whether the résumé autofills**
+- [ ] **Step 5: Find out exactly what the résumé parser gets wrong**
 
-The form says the résumé is parsed to fill in application details. In a scratch script, upload `docs/resume.pdf` to the résumé input, wait, and re-extract. If fields come back pre-populated, Stage 6 should upload first and fill only what remains. Record the finding.
+Upload `docs/resume.pdf` to the résumé input in a scratch script, wait for the
+parse, and re-extract the snapshot. Then compare every populated
+`current_value` against the profile and write down which ones are wrong.
+
+That list is the useful artifact: a concrete record of what Rippling's parser
+mis-extracts from *your* résumé. It tells Stage 6 which fields always need
+overwriting, and it is a good line in NOTES.md.
+
+Expected, from how these parsers generally behave: names split oddly, phone
+formatting mangled, dates approximate, employer or title subtly wrong.
+
+**The agent must never accept a prefilled value as correct just because it is
+non-empty.** Confirm `apply_safety_rules` routes an unconfirmable prefilled
+field to the human.
 
 - [ ] **Step 6: Write the Stage 4 + 5 section of `NOTES.md`**
 
@@ -1066,6 +1163,10 @@ git commit -m "feat: end-to-end extract and plan against the real Rippling form"
 Stage 6 executes a `FillPlan` with `locator_for` and verifies every write by
 reading it back. The open questions it inherits:
 
-- whether the résumé upload autofills, and therefore whether to upload first
+- fill ordering is settled: **upload the résumé first, re-extract, then
+  overwrite every field the profile knows.** Never "fill only the gaps" — a
+  non-empty field is not a correct field
+- which specific fields Rippling's parser gets wrong on this résumé (Task 5,
+  Step 5), since those need overwriting every time
 - whether `en-CA` changes the work-eligibility questions
 - whether any accessible name is ambiguous enough to need an occurrence index
