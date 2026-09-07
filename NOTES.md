@@ -154,12 +154,97 @@ at once; chasing down copies is a losing game.
 
 ---
 
-## Stage 1 — the tool protocol
+## Stage 1 — the tool protocol (Task 3: one hand-built round-trip)
 
-<!-- Fill in after Task 3 and Task 5. Questions to answer:
-     - What does stop_reason tell you? Which values did I see?
-     - Why must the assistant's content go back verbatim, not summarized?
+Asked "What school does the candidate attend?" with `get_profile` declared as a
+tool. Got back a four-message conversation:
+
+```
+[0] user       "What school does the candidate attend?"
+[1] assistant  tool_use    id=toolu_012gr22EHrfDi2wAxf38tPiX  name=get_profile  input={}
+[2] user       tool_result tool_use_id=toolu_012gr22EHrfDi2wAxf38tPiX
+[3] assistant  text        "...attends Washington University in St. Louis."
+```
+
+### stop_reason is the loop's exit condition
+
+Saw two values: `'tool_use'` on the first response and `'end_turn'` on the
+second. `'tool_use'` means Claude is not answering — it's asking *me* to run
+something and come back. `'end_turn'` means it's done.
+
+That's the whole basis for the `while` loop in Task 4: keep going while
+`stop_reason == "tool_use"`.
+
+### The id is the join key, because the API has no memory
+
+The same string `toolu_012gr...` appears in message 1 (Claude's request) and
+message 2 (my answer). Every request resends the **entire** conversation — the
+API is stateless — so that id is the only thing linking my result to its
+question.
+
+### Why the assistant's content goes back verbatim
+
+I append `first.content` — the actual list of SDK block objects — not a string
+summary. The API needs the original `tool_use` block present in the history so
+it can match my `tool_result` against it. Summarizing it would delete the id
+and break the pairing.
+
+### Claude never saw my function
+
+It decided to call `get_profile` from the **name, description, and schema
+alone**. The source code was never sent. That's why the description field
+matters so much: it's the entire basis for the model's decision.
+
+Also: message 1 contained *only* a tool_use block, no text. It could have had
+both, which is why I search `content` by block type instead of taking
+`content[0]`.
+
+### Two error classes, diagnosed completely differently
+
+Broke the `tool_use_id` on purpose. First attempt broke it the wrong way — I
+mangled the attribute name (`tool_use.idhjgjhgjhg`) and got:
+
+```
+AttributeError: 'ToolUseBlock' object has no attribute 'idhjgjhgjhg'
+```
+
+**That never reached the API.** Client-side crash, request never built, nothing
+spent. Traceback was all my file plus pydantic — no HTTP anywhere.
+
+Second attempt, replacing the *value* with `"toolu_wrong"`, produced the real
+thing:
+
+```
+anthropic.BadRequestError: Error code: 400
+  messages.2.content.0: unexpected `tool_use_id` found in `tool_result` blocks:
+  toolu_wrong. Each `tool_result` block must have a corresponding `tool_use`
+  block in the previous message.
+```
+
+Anatomy of that message, worth knowing because most API errors are worse:
+
+- `messages.2.content.0` — a **path into the request body I sent**: message
+  index 2, content block index 0. Points at the exact block.
+- names the offending value, so it's greppable
+- states the rule: the matching `tool_use` must be in the **immediately
+  previous** message, not anywhere in the conversation
+- `request_id` identifies the request on Anthropic's side, for support tickets
+
+**The rule I'm taking from this:** `AttributeError` / `TypeError` / `KeyError`
+means my code is wrong and nothing left the machine. A `BadRequestError` means
+my code ran fine and the *server* rejected the protocol. Traceback contents tell
+you which in about two seconds — my files versus `_base_client.py`.
+
+<!-- TODO(me): rewrite the above in my own words where it sounds like someone
+     else wrote it. Especially the error-class rule — that's the part I'd
+     actually get asked about. -->
+
+---
+
+## Stage 1 — the loop (Tasks 4 and 5)
+
+<!-- Fill in after Task 5. Questions to answer:
      - Why do parallel tool results go in a single user message?
      - Did my run chain or parallelize, and how could I tell?
-     - What did the deliberately-broken tool_use_id error say?
+     - What broke while writing the loop, if anything?
 -->
