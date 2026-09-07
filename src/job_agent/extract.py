@@ -136,6 +136,7 @@ CONTROL_SELECTOR = (
 def extract_snapshot(page) -> FormSnapshot:
     fields: list[FormField] = []
     index = 0
+    file_index = 0
 
     for element in page.locator(CONTROL_SELECTOR).all():
         input_type = (element.get_attribute("type") or "").lower()
@@ -173,6 +174,11 @@ def extract_snapshot(page) -> FormSnapshot:
 
         name = re.sub(r"\s*(Select\.{0,3}|Choose\.{0,3})\s*$", "", raw_name, flags=re.I)
         name = name.rstrip("* ").strip()[:150] or "(unlabelled file upload)"
+        hint = None
+        if kind == "file":
+            hint = f"file:{file_index}"
+            file_index += 1
+
         index += 1
         fields.append(
             FormField(
@@ -184,6 +190,7 @@ def extract_snapshot(page) -> FormSnapshot:
                 options=options,
                 current_value=element.get_attribute("value") or None,
                 help_text=context[:300] if kind == "attention_check" else None,
+                locator_hint=hint,
             )
         )
 
@@ -210,6 +217,11 @@ def locator_for(page, field: FormField):
     """Resolve a FormField back to a Playwright locator.
 
     Role + accessible name, because that pair is stable across renders while
-    name/id are not.
+    name/id are not. File inputs are the exception: they carry no useful ARIA
+    role and their labels are things like "Drop or select (.doc / .docx)", so
+    they are addressed positionally via locator_hint instead.
     """
+    if field.locator_hint and field.locator_hint.startswith("file:"):
+        n = int(field.locator_hint.split(":", 1)[1])
+        return page.locator("input[type=file]").nth(n)
     return page.get_by_role(field.role, name=field.accessible_name, exact=True)

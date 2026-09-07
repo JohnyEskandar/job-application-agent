@@ -6,6 +6,8 @@ reverts — routine on React-controlled inputs — would otherwise submit a blan
 field with no error anywhere.
 """
 
+from pathlib import Path
+
 from job_agent.extract import locator_for
 from job_agent.models import (
     FieldResult,
@@ -19,6 +21,28 @@ from job_agent.models import (
 TEXTUAL_KINDS = {"text", "textarea", "email", "tel", "number", "url", "date"}
 
 
+def upload_file(page, locator, path) -> None:
+    """Attach a file to a file input.
+
+    File inputs are routinely hidden behind a styled button, so this targets
+    the underlying <input type=file> rather than whatever is visible.
+    """
+    locator.set_input_files(str(Path(path)))
+
+
+def choose_in_custom_combobox(page, locator, value: str) -> None:
+    """Open a div-based combobox and click the matching option.
+
+    select_option() only works on a native <select>. Rippling — and most
+    component libraries — render dropdowns as divs, so the only way in is to
+    drive it the way a person would: click to open, click the option.
+    """
+    locator.click()
+    option = page.get_by_role("option", name=str(value), exact=True)
+    option.wait_for(state="visible", timeout=5000)
+    option.click()
+
+
 def _write(page, locator, field: FormField, value) -> None:
     if field.kind in TEXTUAL_KINDS:
         locator.fill(str(value))
@@ -28,6 +52,10 @@ def _write(page, locator, field: FormField, value) -> None:
         locator.set_checked(bool(value))
     elif field.kind == "radio":
         locator.check()
+    elif field.kind == "combobox":
+        choose_in_custom_combobox(page, locator, value)
+    elif field.kind == "file":
+        upload_file(page, locator, value)
     else:
         raise NotImplementedError(f"no writer for kind={field.kind}")
 
@@ -35,10 +63,20 @@ def _write(page, locator, field: FormField, value) -> None:
 def _read_back(page, locator, field: FormField) -> str:
     if field.kind in {"checkbox", "radio"}:
         return "true" if locator.is_checked() else "false"
+    if field.kind == "combobox":
+        # a div has no value — what it displays IS its value
+        return (locator.inner_text() or "").strip()
+    if field.kind == "file":
+        # the intended value is a path, but the only thing worth verifying is
+        # that a file actually got attached
+        return "attached" if locator.evaluate("e => e.files && e.files.length") else ""
     return locator.input_value()
 
 
 def _matches(field: FormField, intended: str, observed: str) -> bool:
+    if field.kind == "file":
+        # a path can never equal "attached"; the attachment is the success
+        return observed == "attached"
     if field.kind == "select":
         # a <select> reports its VALUE; the plan names the visible LABEL
         return observed.strip().lower() == intended.strip().lower()

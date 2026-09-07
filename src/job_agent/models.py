@@ -150,6 +150,11 @@ class FormField(Strict):
     # A non-empty value is NOT evidence that the field is correct.
     current_value: str | None = None
     help_text: str | None = None
+    # Internal plumbing for controls the accessibility tree cannot address by
+    # role+name — file inputs, mostly. excluded from serialization, so the
+    # model never sees a selector and the field_id stays the only handle it
+    # has. Format: "file:<n>" meaning the nth input[type=file] in DOM order.
+    locator_hint: str | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def choice_fields_need_options(self):

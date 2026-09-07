@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head><title>Custom Widgets</title></head>
+  <body>
+    <label id="fav-label">Favourite colour</label>
+    <div id="fav" role="combobox" aria-labelledby="fav-label" aria-expanded="false" tabindex="0">
+      Select...
+    </div>
+    <ul id="fav-list" role="listbox" hidden>
+      <li role="option" data-value="red">Red</li>
+      <li role="option" data-value="blue">Blue</li>
+    </ul>
+
+    <label for="cv">Resume</label>
+    <input id="cv" type="file" />
+
+    <script>
+      // Mimics how a component library renders a dropdown: a div, not a select.
+      // This fixture is hand-written, so it keeps its script — the stripping
+      // rule applies to CAPTURED SPA pages, not to fixtures we author.
+      const box = document.getElementById('fav');
+      const list = document.getElementById('fav-list');
+      box.addEventListener('click', () => {
+        const open = box.getAttribute('aria-expanded') === 'true';
+        box.setAttribute('aria-expanded', String(!open));
+        list.hidden = open;
+      });
+      list.querySelectorAll('[role=option]').forEach(opt => {
+        opt.addEventListener('click', () => {
+          box.textContent = opt.textContent;
+          box.dataset.value = opt.dataset.value;
+          box.setAttribute('aria-expanded', 'false');
+          list.hidden = true;
+        });
+      });
+    </script>
+  </body>
+</html>
