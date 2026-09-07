@@ -2,15 +2,15 @@
 
 Run:  python scripts/fill_here.py [starting-url]
 
-For sites the agent cannot reach on its own — anything behind a login,
-an account creation step, or a multi-step flow like Eightfold's
-upload-resume-then-generate-a-profile.
+For sites the agent cannot reach on its own — anything behind a login, an
+account creation step, or a different flow shape like Eightfold's
+upload-a-resume-and-we-generate-the-application.
 
-You drive the browser to the form. Press Enter. It fills what it can and
-hands the browser straight back. It still cannot submit.
+You drive the browser. Press Enter when a form is on screen. It reads
+whichever tab you are actually looking at, fills what it can, and hands the
+browser straight back. It still cannot submit.
 
-The browser uses the persistent profile, so a login done here survives into
-later runs.
+The persistent profile means a login done here survives into later runs.
 """
 
 import sys
@@ -27,10 +27,39 @@ from job_agent.profile import load_profile
 from job_agent.review import show
 
 
+def live_pages(ctx):
+    return [p for p in ctx.pages if not p.is_closed()]
+
+
+def choose_page(ctx):
+    """Return the tab the human is most likely looking at.
+
+    Sites routinely open the real application in a new tab, so holding the
+    page object we created reads a stale page and looks like the agent is
+    doing nothing.
+    """
+    pages = [p for p in live_pages(ctx) if p.url not in ("about:blank", "")]
+    if not pages:
+        return None
+    if len(pages) == 1:
+        return pages[0]
+
+    print("\n  Several tabs are open:")
+    for i, p in enumerate(pages, 1):
+        try:
+            print(f"    [{i}] {p.title()[:50]:52} {p.url[:56]}")
+        except Exception:
+            print(f"    [{i}] (unreadable) {p.url[:56]}")
+    choice = input(f"  Which one has the form? [1-{len(pages)}, Enter = last] > ").strip()
+    if choice.isdigit() and 1 <= int(choice) <= len(pages):
+        return pages[int(choice) - 1]
+    return pages[-1]
+
+
 def main() -> None:
     require_api_key()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    start = args[0] if args else "about:blank"
+    start = args[0] if args else None
 
     profile = load_profile()
     client = anthropic.Anthropic()
@@ -39,34 +68,61 @@ def main() -> None:
 
     with browser_context(headless=False) as ctx:
         page = ctx.new_page()
-        if start != "about:blank":
+        if start:
             page.goto(start, wait_until="domcontentloaded")
 
         print("\n  A browser window is open and it is yours.")
         print("  Log in, click through, get to the application form.")
-        print("  Anything you type is kept — this profile persists between runs.\n")
+        print("  New tabs are fine — it reads whichever tab you point it at.\n")
 
         while True:
-            input("  Press Enter when the form is on screen (or Ctrl-C to quit). > ")
+            try:
+                input("  Press Enter when a form is on screen (Ctrl-C to quit). > ")
+            except (KeyboardInterrupt, EOFError):
+                break
 
-            snapshot = probe_combobox_options(page, extract_snapshot(page))
-            if not snapshot.fields:
-                print("  No form fields found on this page. Navigate further and try again.\n")
+            if not live_pages(ctx):
+                print("  Every tab is closed. Nothing left to read.\n")
+                break
+
+            target = choose_page(ctx)
+            if target is None:
+                print("  No loaded page found. Navigate somewhere and try again.\n")
                 continue
 
-            print(f"  Found {len(snapshot.fields)} fields on {page.url[:70]}")
+            try:
+                target.bring_to_front()
+                print(f"\n  Reading: {target.title()[:64]}")
+                print(f"           {target.url[:78]}")
+                snapshot = probe_combobox_options(target, extract_snapshot(target))
+            except Exception as exc:
+                print(f"  Could not read that tab ({type(exc).__name__}). Try again.\n")
+                continue
+
+            if not snapshot.fields:
+                print("  No form fields on that page. Navigate further and try again.\n")
+                continue
+
+            print(f"  {len(snapshot.fields)} fields found. Planning...\n")
             plan = build_plan(client, snapshot, profile)
-            report = execute_plan(page, snapshot, plan)
+            report = execute_plan(target, snapshot, plan)
 
             shot = run_dir / f"page{len(list(run_dir.glob('*.png'))) + 1}.png"
-            page.screenshot(path=str(shot))
+            try:
+                target.screenshot(path=str(shot))
+            except Exception:
+                pass
             show(snapshot, plan, report, str(shot))
 
-            again = input("\n  Fill another page? [y to continue, Enter to finish] > ").strip().lower()
+            again = input("\n  Fill another page? [y / Enter to finish] > ").strip().lower()
             if again != "y":
                 break
 
-        input("\n  Done. Finish and submit it yourself. Press Enter to close the browser. > ")
+        if live_pages(ctx):
+            try:
+                input("\n  Done. Finish and submit it yourself. Press Enter to close. > ")
+            except (KeyboardInterrupt, EOFError):
+                pass
 
     print(f"  screenshots: {run_dir}")
 
