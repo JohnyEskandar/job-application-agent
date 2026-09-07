@@ -33,32 +33,49 @@ def live_pages(ctx):
     return [p for p in ctx.pages if not p.is_closed()]
 
 
-def choose_page(ctx, remembered=None):
-    """Return the tab the human is looking at, asking only when it is unclear.
+def _field_count(page) -> int:
+    """How many form controls this tab has.
 
-    Sites routinely open the real application in a new tab, so holding the page
-    object we created reads a stale page and looks like nothing is happening.
-    But re-asking on every single page of a six-page form is its own kind of
-    misery, so the choice is remembered until that tab closes.
+    This is the signal that actually works. document.visibilityState reports
+    "visible" for every tab, and document.hasFocus() is unreliable across
+    windows — but a job posting has zero or one control while an application
+    form has dozens. The form is the tab with the fields.
     """
-    pages = [p for p in live_pages(ctx) if p.url not in ("about:blank", "")]
+    try:
+        return page.locator(
+            "input:not([type=hidden]):not([type=submit]):not([type=button]), "
+            "textarea, select, [role=combobox], [role=textbox]"
+        ).count()
+    except Exception:
+        return 0
+
+
+def choose_page(ctx, remembered=None):
+    """Return the tab holding the application form."""
+    pages = [p for p in live_pages(ctx) if p.url not in ("", "chrome://newtab/")]
     if not pages:
         return None
-    if remembered is not None and remembered in pages:
-        return remembered
     if len(pages) == 1:
         return pages[0]
 
+    scored = sorted(((_field_count(p), p) for p in pages), key=lambda x: -x[0])
+    best, runner_up = scored[0], scored[1]
+
+    # A clear winner: the form has far more controls than anything else.
+    if best[0] > 0 and best[0] > runner_up[0]:
+        return best[1]
+
+    # Nothing has fields, or two tabs tie. Ask, and show the counts.
     print("\n  Several tabs are open:")
-    for i, p in enumerate(pages, 1):
+    for i, (count, pg) in enumerate(scored, 1):
         try:
-            print(f"    [{i}] {p.title()[:50]:52} {p.url[:56]}")
+            print(f"    [{i}] {count:3} fields  {pg.title()[:42]:44} {pg.url[:48]}")
         except Exception:
-            print(f"    [{i}] (unreadable) {p.url[:56]}")
-    choice = input(f"  Which one has the form? [1-{len(pages)}, Enter = last] > ").strip()
-    picked = pages[int(choice) - 1] if choice.isdigit() and 1 <= int(choice) <= len(pages) else pages[-1]
-    print("  (remembering this tab — it will not ask again unless it closes)")
-    return picked
+            print(f"    [{i}] {count:3} fields  (unreadable) {pg.url[:48]}")
+    choice = input(f"  Which one? [1-{len(scored)}, Enter = most fields] > ").strip()
+    if choice.isdigit() and 1 <= int(choice) <= len(scored):
+        return scored[int(choice) - 1][1]
+    return scored[0][1]
 
 
 def main() -> None:
@@ -79,12 +96,11 @@ def main() -> None:
 
         print("\n  A browser window is open and it is yours.")
         print("  Log in, click through, get to the application form.")
-        print("  New tabs are fine — it reads whichever tab you point it at.")
+        print("  New tabs are fine — it reads whichever tab is in front when you press Enter.")
         if auto:
             print("  --auto: it will fill and advance on its own once you press Enter once.")
         print()
 
-        chosen = None
         filled_any = False
 
         while True:
@@ -101,8 +117,7 @@ def main() -> None:
                 print("  Every tab is closed. Nothing left to read.\n")
                 break
 
-            target = choose_page(ctx, chosen)
-            chosen = target
+            target = choose_page(ctx)
             if target is None:
                 print("  No loaded page found. Navigate somewhere and try again.\n")
                 continue
@@ -124,8 +139,6 @@ def main() -> None:
                     print("  No form fields here — looks like the end. Stopping.\n")
                     break
                 print("  No form fields on that page. Navigate to the form and try again.")
-                print("  (forgetting the tab choice, so it will ask again)\n")
-                chosen = None
                 continue
 
             filled_any = True
