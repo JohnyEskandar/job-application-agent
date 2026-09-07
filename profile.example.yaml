@@ -1,0 +1,54 @@
+# Example profile with fake data. Copy to profile.yaml and fill in your real
+# details. profile.yaml is gitignored; this file is committed so anyone
+# cloning the repo knows the shape.
+
+identity:
+  first_name: Alex
+  last_name: Kim
+  email: alex.kim@example.com
+  phone: "+1 555 010 0100"
+
+location:
+  city: St. Louis
+  state: MO
+  country: United States
+  postal_code: "63130"
+  willing_to_relocate: true
+
+links:
+  linkedin: https://linkedin.com/in/example
+  github: https://github.com/example
+
+work_authorization:
+  authorized_to_work_us: true
+  requires_sponsorship_now: false
+  requires_sponsorship_future: false
+  status: US Citizen
+
+education:
+  - school: Example University
+    degree: B.S.
+    field: Computer Science
+    start: "2022-08"
+    end: "2026-05"
+    gpa: "3.8"
+
+experience:
+  - company: Example Corp
+    title: Software Engineering Intern
+    start: "2025-06"
+    end: "2025-08"
+    location: Remote
+    bullets:
+      - Built an internal dashboard used by the support team.
+      - Reduced a nightly batch job from 40 minutes to 6.
+
+skills:
+  - Python
+  - TypeScript
+  - React
+
+preferences:
+  desired_salary: "Open to discussion"
+  earliest_start_date: "2026-06-01"
+  remote_preference: Hybrid
